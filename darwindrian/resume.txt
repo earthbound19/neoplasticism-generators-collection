@@ -1,0 +1,132 @@
+Resume - Jian Yin Shen
+
+Personal information
+
+Name:			Jian Yin Shen
+Gender:		Male
+Day of Birth:		14/12/1982
+Mobile phone: 	0402674951
+Email: 			u4204487@anu.edu.au
+Address: 		530B Northbourne Avenue, Downer, ACT 2602
+Languages:		English, Chinese
+
+General Description
+
+Myself
+Ability of fast learning and quick understanding of new technologies
+Talent and passion in software designing and programming
+Hard working
+Nice teamwork spirits
+Attitude: Programming is entertainment
+
+Working Environment Demanded
+An agile, technology-centered company (not necessarily big) with a group of friendly people with passion on newest technologies, software and gadgets;
+Free Biscuit and coffee.
+
+Education
+
+2005 每 2007 Australian National University:
+	Working on Master of Information Technology
+
+2001 每 2005 East China University of Science And Technology:
+	Bachelor of Engineering
+
+Detailed Professional Skills
+
+Orientation
+
+Web development
+GUI (rich client) development 
+Enterprise application development
+
+Mastering Languages And Libraries
+
+Java:			J2SE 5.0; J2EE 1.3 
+web development:	STRUTS/Hibernate/Ruby on Rails/CSS
+Script languages:	Python/JPython/Ruby/Javascript
+Markup Languages:	HTML/XML/Web Service(SOAP)
+Database:		SQL
+Linux:			BASH shell
+
+Methodologies
+
+Object Oriented Programming
+Function Programming
+Design Patterns
+Extreme Programming
+Test Driven Programming
+
+Development Environment And Platforms
+
+Build tools:		Ant, Ruby Rake
+IDEs and editors: 	Eclipse 3.1, VI, JEditor, GEditor, Kate
+Unit testing:		Junit
+Operation System:	Windows NT, Linux(SuSE, Ubuntu), Mac OS X
+Databases:		MySQL, Oracle 9i
+
+
+Experiences
+
+November 2004 - May 2005, at Wuerth Phoenix (6 months as internship before graduation)
+Company web site: 		www.wuerth-phoenix.com
+The project worked on: 	Wuerth Phoenix ERP 3.0 Milestone 1 每 4
+
+Project description
+Wuerth Phoenix ERP 3.0 was a large scale distributed ERP program managing logistics and financial transactions. It was built on a framework called ZEUS which was aimed to provide seamless domain-object-persistance as well as transaction controls. The presentation layer was built based on Java Swing
+and CORBA was used as communication implementation. 
+
+My role in the Team
+Role 1: Java Programmer 每 participate in meetings with requirement engineers and develop modules that complete certain tasks.
+
+Role 2: Development Server administrator 每 maintain a Linux daily-build and testing server, keep several testing instances running and updated, monitor the daily build procedure; write BASH script to automate the management if necessary. 
+
+Achievement
+Completing development tasks fulfilling client's requirements in due time with few bugs produced;
+Successfully maintain the functionality of the testing server.
+
+Professional Certificates
+
+SUN Certified Java Programmer
+SUN Certified Java Web Component Developer
+IBM Certified Solution Developer
+Internship Assessment from Wuerth Phoenix
+
+Academical Record
+
+Thesis Title
+"Cyber-Genetic Neo-Plasticism: An AI program Creating Mondrian-like Paintings by using Interactive Bacterial Evolution Algorithm"
+
+Recent Transcript (see attachment for the official scan version)
+HD = High Distinction
+D = Distinction
+C = Credit
+
+Relational Databases			D
+Human-Computer Interface		D
+Computer Graphics			D
+
+Artificial Intelligence			C
+Software Design And Analysis	D
+Networked Data Analysis		HD
+
+Referees
+
+Supervisor
+
+Professor Tom Gedeon, head of Department of Science of ANU
+	web page:	http://cs.anu.edu.au/~Tom.Gedeon/index.html
+	email:		tom@cs.anu.edu.au
+
+Related
+
+Mr Le Song, Ph.D student of University of Sydney
+	telephone:	0411370156
+
+Past colleges
+
+Telephone for all: +86 (21) 6253 2266 
+Mr Yan Yang, Java Developer of Wuerth Phoenix
+	email:		sunheat.yang@wuerth-phoenix.com
+
+Mr Eric Hu, Project Manager of Wuerth Phoenix Development Team
+	email:		eric.hu@wuerth-phoenix.com
