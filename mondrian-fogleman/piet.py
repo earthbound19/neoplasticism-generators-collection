@@ -2,7 +2,9 @@
 # Generates Piet Mondrian-style "neo-plasticism" paintings. Source: https://github.com/fogleman/Piet re : http://fogleman.tumblr.com/post/11959143268/procedurally-generating-images-in-the-style-of
 
 # USAGE
-# Python piet.py
+# python piet.py
+# OR, if that throws an error about a framework build, try:
+# pythonw piet.py
 
 # DEPENDENCIES:
 # Python 2? Tested and works with Python 2.7.11.
