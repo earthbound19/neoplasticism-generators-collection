@@ -2,7 +2,9 @@
 # Generates Piet Mondrian-style "neo-plasticism" paintings. Source: https://github.com/fogleman/Piet re : http://fogleman.tumblr.com/post/11959143268/procedurally-generating-images-in-the-style-of
 
 # USAGE
-# Python piet.py
+# python piet.py
+# OR, if that throws an error about a framework build, try:
+# pythonw piet.py
 
 # DEPENDENCIES:
 # Python 2? Tested and works with Python 2.7.11.
@@ -22,20 +24,19 @@ import wx
 import random
 
 # Function to generate random file names for generated images:
-def random_string(length):
+def random_png_filename(length):
     charSet = '23456789abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ'
-    return ''.join(random.choice(charSet) for i in range(length))
+    return 'MFH_' + ''.join(random.choice(charSet) for i in range(length)) + '.png'
 
 # Function to save bitmap extracted from dc:
 def save_image_from_dc(dc):
     img = dc.AsBitmap
-    rndString = random_string(15)
-    saveFileName = rndString + '.png'
+    saveFileName = random_png_filename(15)
     img.SaveFile(saveFileName, wx.BITMAP_TYPE_PNG)
 
 class Mondrian(object):
     def __init__(self):
-        self.set_client_size(1600, 1200)
+        self.set_client_size(800, 600)
     def set_client_size(self, w, h):
         self.client_size = (w, h)
         self.reset()
@@ -166,13 +167,18 @@ class Frame(wx.Frame):
         self.update()
     def update(self):
         self.reset()
-        wx.CallLater(1, self.update)
+        # The number in this next line defines how many milliseconds to wait before generating and displaying another image, or it never updates if you comment it out:
+        # wx.CallLater(5000, self.update)
     def reset(self):
         self.page.reset()
         self.Refresh()
+    # On left mouse button click or any key down other than ESCAPE, reset (generate another image):
     def on_key_down(self, event):
         if event.GetKeyCode() == wx.WXK_ESCAPE:
             self.Close()
+        else:
+            # foo = 'bar'
+            self.reset()
     def on_left_down(self, event):
         self.reset()
     def on_paint(self, event):
