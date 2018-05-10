@@ -5,8 +5,7 @@
 # Horked and adapted from: https://scipython.com/blog/computer-generated-mondrian-art-2/
 
 # DEPENDENCIES
-# - python 3.4.8
-# - numpy? At this writing, invoking this script throws an unknown identifier EPS error, and from searching, it seems that some EPS object is provided by numpy.
+# - python 3
 
 # USAGE
 # python DeStijl.py
@@ -14,11 +13,20 @@
 # LICENSE
 # Open? :|
 
+# TO DO
+# - randomly name the output file
+# - take CLI parameters which set:
+#  - width
+#  - height
+#  - nLines: number of lines in the painting
+#  - a color palette .hexplt source
+#  - how many paintings to generate (to do: generate N paintings).
+
 
 
 # CODE
 import random
-# import numpy
+EPS = 1.e-12		# Had to dig that out of inline commentary in the HTML page with the source
 
 
 class Vector:
@@ -389,8 +397,8 @@ line {
 
 
 # Generate a painting via all of the above, and save it to mondrian.svg
-nlines = 32
-width, height = 1000, 720
+nlines = 17
+width, height = 1000, 1000
 minarea = 5000 / (width * height)
 canvas = Canvas(width, height)
 canvas.make_painting(nlines, minarea, orthogonal=True)
