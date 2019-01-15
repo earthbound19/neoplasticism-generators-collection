@@ -366,7 +366,7 @@ class Canvas:
 
 line {
     stroke: #000;
-    stroke-width: 5px;
+    stroke-width: 8px;
     fill: none;
 }
 
@@ -397,18 +397,16 @@ line {
 
 
 
-# Generate a painting via all of the above, and save it to mondrian.svg
-nlines = 17
-# 11" x 8.5" for standard landscape printer paper:
-width, height = 792, 612
-# width, height = 1000, 1000
-import string
-# minarea = 5000 / (width * height)
-# OR? -- 215 billionths of total area? :
-minarea = (width * height) * 0.0000000215
-canvas = Canvas(width, height)
-canvas.make_painting(nlines, minarea, orthogonal=True)
-# To generate random 14-character string for random file base name:
-import random
-file_base_name = ''.join(random.choices(string.ascii_uppercase + string.digits, k=14))
-canvas.write_svg(file_base_name + '.svg')
+# Generate N paintings via all of the above, and save to random file names
+for i in range(0, 8):
+	nlines = 10
+	# 11" x 8.5" for standard landscape printer paper:
+	width, height = 792, 612
+	import string
+	minarea = (width * height) * 0.000000055
+	canvas = Canvas(width, height)
+	canvas.make_painting(nlines, minarea, orthogonal=True)
+	# To generate random 14-character string for random file base name:
+	import random
+	file_base_name = ''.join(random.choices(string.ascii_uppercase + string.digits, k=14))
+	canvas.write_svg(file_base_name + '.svg')
