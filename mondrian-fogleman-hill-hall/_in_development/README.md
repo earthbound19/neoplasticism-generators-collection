@@ -3,7 +3,7 @@ Computer-generated Mondrian art
 
 Source: https://github.com/xnx/mondrian
 
-This repository is not synced with that.
+This repository is not synced with that. I have not yet gotten valid output from these--I suspect an older Python version than 3 is required.
 
 See http://scipython.com/blog/computer-generated-mondrian-art-1/ for more information.
 
