@@ -402,7 +402,13 @@ nlines = 17
 # 11" x 8.5" for standard landscape printer paper:
 width, height = 792, 612
 # width, height = 1000, 1000
-minarea = 5000 / (width * height)
+import string
+# minarea = 5000 / (width * height)
+# OR? -- 215 billionths of total area? :
+minarea = (width * height) * 0.0000000215
 canvas = Canvas(width, height)
 canvas.make_painting(nlines, minarea, orthogonal=True)
-canvas.write_svg('mondrian.svg')
+# To generate random 14-character string for random file base name:
+import random
+file_base_name = ''.join(random.choices(string.ascii_uppercase + string.digits, k=14))
+canvas.write_svg(file_base_name + '.svg')
