@@ -207,6 +207,7 @@ class Canvas:
 
     # Fill colours for polygons, and their cumulative probability distribution
     colours = ['blue', 'red', 'yellow', 'white']
+    # colours = ['cyan', 'magenta', 'purple', 'gray']
     colours_cdf = [0.15, 0.3, 0.45, 1.0]
     def get_colour(self):
         """
