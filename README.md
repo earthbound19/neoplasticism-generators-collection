@@ -10,7 +10,6 @@ Because.
 Part of the point of this is to archive source code found elsewhere. To archive:
 
 - various: https://stackoverflow.com/questions/36435261/mondrian-art-program-python
-- Takes Fogleman's work and makes SVGs! : https://scipython.com/blog/computer-generated-mondrian-art-1/
 - [Mondrian generator 3.0](https://github.com/AnoAn/Mondrian-generator)
 - http://www.transcrypt.org/live/turtle_site/turtle_site.html -- more brutal
 - [Results are mediocre](https://github.com/JEFworks/mondrian-generator) (poorly proportioned) -- lists other mondrian generators

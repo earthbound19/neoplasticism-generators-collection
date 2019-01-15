@@ -1,33 +1,9 @@
-# DESCRIPTION
-# Generates a Piet Mondrian (De Stijl, or neoplacticism) style painting.
+# mondrian2.py
 
-# SOURCE
-# Horked and adapted from: https://scipython.com/blog/computer-generated-mondrian-art-2/
-
-# DEPENDENCIES
-# - python 3
-
-# USAGE
-# python DeStijl.py
-
-# LICENSE
-# Open? :|
-
-# TO DO
-# - randomly name the output file
-# - take CLI parameters which set:
-#  - width
-#  - height
-#  - nLines: number of lines in the painting
-#  - a color palette .hexplt source
-#  - how many paintings to generate (to do: generate N paintings).
-
-
-
-# CODE
 import random
-EPS = 1.e-12		# Had to dig that out of inline commentary in the HTML page with the source
 
+# A very small number for comparing floats properly
+EPS = 1.e-12
 
 class Vector:
     """ A lightweight vector class in two-dimensions. """
@@ -66,11 +42,9 @@ class Vector:
         """ z-component of vector cross product, a x b = ax.by - ay.bx. """
         return self.x * other.y - self.y * other.x
 
-
-
 class Line:
     """ A simple class representing a line segment between two points in 2D. """
-
+    
     def __init__(self, p, r):
         """
         p is the start point vector, r is the vector from this start point
@@ -129,8 +103,6 @@ class Line:
 
         return (self.is_parallel(other) and
                 abs((self.p - other.p).cross(self.r)) < EPS)
-
-
 
 class Polygon:
     """ A small class to represent a polygon in two dimensions. """
@@ -200,8 +172,6 @@ class Polygon:
     def __str__(self):
         return ', '.join([str(v) for v in self.vertices])
 
-
-
 class Canvas:
 
     # Fill colours for polygons, and their cumulative probability distribution
@@ -267,7 +237,7 @@ class Canvas:
         new_polygons to self.polygons.
 
         """
-
+        
         self.polygons -= old_polygons
         self.polygons.update(new_polygons)
 
@@ -383,7 +353,7 @@ line {
                 colour = self.get_colour()
                 print('<path d="{}" style="fill: {}"/>'.format(s, colour),
                       file=fo)
-
+                    
             for line in self.lines[4:]:
                 x1, y1 = line.p.x * self.width, line.p.y * self.height
                 x2, y2 = ((line.p + line.r).x * self.width,
@@ -393,13 +363,3 @@ line {
                                         .format(x1,y1,x2,y2), file=fo)
 
             print('</svg>', file=fo)
-
-
-
-# Generate a painting via all of the above, and save it to mondrian.svg
-nlines = 17
-width, height = 1000, 1000
-minarea = 5000 / (width * height)
-canvas = Canvas(width, height)
-canvas.make_painting(nlines, minarea, orthogonal=True)
-canvas.write_svg('mondrian.svg')
