@@ -204,11 +204,17 @@ class Polygon:
 
 
 class Canvas:
-
+# NOTE that you can use #hhhhhh hex colors! :
     # Fill colours for polygons, and their cumulative probability distribution
     colours = ['blue', 'red', 'yellow', 'white']
+    # colours = ['yellow', 'green', 'blue', 'white']
+    # colours = ['green', 'orange', 'purple', 'brown']
     # colours = ['cyan', 'magenta', 'purple', 'gray']
     colours_cdf = [0.15, 0.3, 0.45, 1.0]
+    # colours = ['red', 'orange', 'yellow', 'brown', 'black', 'gray', 'white']
+    # colours_cdf = [0.11, 0.15, 0.3, 0.45, 0.5, 0.9, 1.0]
+    # colours = ['#3a22eb', '#8becb2', '#fff392', 'cyan', '#af6eb9']
+    # colours_cdf = [0.15, 0.3, 0.45, 0.5, 1.0]
     def get_colour(self):
         """
         Pick a colour at random using the cumulative probability distribution
@@ -399,8 +405,8 @@ line {
 
 
 # Generate N paintings via all of the above, and save to random file names
-for i in range(0, 8):
-	nlines = 10
+for i in range(0, 51):
+	nlines = 9
 	# 11" x 8.5" for standard landscape printer paper:
 	width, height = 792, 612
 	import string
