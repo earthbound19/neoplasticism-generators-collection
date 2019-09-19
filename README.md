@@ -13,6 +13,9 @@ Part of the point of this is to archive source code found elsewhere. To archive:
 - [Mondrian generator 3.0](https://github.com/AnoAn/Mondrian-generator)
 - http://www.transcrypt.org/live/turtle_site/turtle_site.html -- more brutal
 - [Results are mediocre](https://github.com/JEFworks/mondrian-generator) (poorly proportioned) -- lists other mondrian generators
+- various? The same? https://newsfeed.kosmograd.com/generative-de-stijl/
+- [Mondify, the Victory Boogie Woogie Generator](http://www.victory-boogie-woogie.appspot.com/)
+- Which if any of these generators does this paper relate to? https://www.fujipress.jp/jaciii/jc/jacii001600070894/
 
 # AKTULLY . . .
 That's hardly Mondrian, but it is useful or neat as something else:
