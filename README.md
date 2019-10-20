@@ -17,6 +17,7 @@ Part of the point of this is to archive source code found elsewhere. To archive:
 - various? The same? https://newsfeed.kosmograd.com/generative-de-stijl/
 - [Mondify, the Victory Boogie Woogie Generator](http://www.victory-boogie-woogie.appspot.com/)
 - Which if any of these generators does this paper relate to? https://www.fujipress.jp/jaciii/jc/jacii001600070894/
+- a [twitter bot coded in nodeJS](https://github.com/airhadoken/neoplastibot)
 
 # AKTULLY . . .
 That's hardly Mondrian, but it is useful or neat as something else:
