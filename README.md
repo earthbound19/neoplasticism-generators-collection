@@ -9,7 +9,7 @@ Because.
 # LIST OF THINGS TO COLLECT HERE
 Part of the point of this is to archive source code found elsewhere. To archive:
 
-- a Processing implementation of [a Mondrianeque algorithm](https://github.com/christophermoverton/Processing/blob/master/MondrianLikeSubdivision/MondrianLikeSubdivision.pde)
+- a Processing implementation of [a Mondrianesque algorithm](https://github.com/christophermoverton/Processing/blob/master/MondrianLikeSubdivision/MondrianLikeSubdivision.pde)
 - various: https://stackoverflow.com/questions/36435261/mondrian-art-program-python
 - [Mondrian generator 3.0](https://github.com/AnoAn/Mondrian-generator)
 - http://www.transcrypt.org/live/turtle_site/turtle_site.html -- more brutal
