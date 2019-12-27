@@ -1,4 +1,5 @@
-// source: https://www.openprocessing.org/sketch/381152/
+// Source: https://www.openprocessing.org/sketch/381152/
+// From information metadata at source: (Piet) Mondrian compositions computed using shape grammar. 'A' adds vertical lines, 'B' adds 'horizontal lines, 'C' adds split vertical lines, and 'D' adds split horizontal lines. The slider controls the number of patches that are coloured. Play around with the buttons to get different compositions.
 // THIS IS A CODE SNAPSHOT. It apparently needs extensive work to run on Processing 3 local (if it even can at all), but it does work at openprocessing.org.
 
 String rule="AABBCCDDDDDD";
