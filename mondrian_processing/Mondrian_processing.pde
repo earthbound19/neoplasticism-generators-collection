@@ -1,6 +1,10 @@
 // Source: https://www.openprocessing.org/sketch/381152/
-// From information metadata at source: (Piet) Mondrian compositions computed using shape grammar. 'A' adds vertical lines, 'B' adds 'horizontal lines, 'C' adds split vertical lines, and 'D' adds split horizontal lines. The slider controls the number of patches that are coloured. Play around with the buttons to get different compositions.
-// THIS IS A CODE SNAPSHOT from a variant of Processing that runs in JavaScript at openprocessing.org. Enough refactoring of it has been done for desktop Processing (Java) that it runs without error but accomplishes nothing useful (nothing is drawn or filled, apparently).
+// From information metadata at source: (Piet) Mondrian compositions computed using shape grammar. 'A' adds vertical lines,
+// 'B' adds 'horizontal lines, 'C' adds split vertical lines, and 'D' adds split horizontal lines. The slider controls the
+// number of patches that are coloured. Play around with the buttons to get different compositions.
+// THIS IS A CODE SNAPSHOT from a variant of Processing that runs in JavaScript at openprocessing.org. Enough refactoring
+// of it has been done for desktop Processing (Java) that it runs without error but accomplishes nothing useful
+// (nothing is drawn or filled, apparently).
 
 String rule = "AABBCCDDDDDD";
 String s =rule;
