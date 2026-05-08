@@ -1,8 +1,8 @@
 // DESCRIPTION
 // Mondrian Composition Generator
-// Ported from p5js (OpenProcessing sketch 381152) by Qeen Bee Art to desktop Processing: https://www.openprocessing.org/sketch/381152/
+// Ported from p5js (OpenProcessing sketch 381152) by Queen Bee Art to desktop Processing: https://www.openprocessing.org/sketch/381152/
 // From information metadata at source: (Piet) Mondrian compositions computed using shape grammar. 'A' adds vertical lines,
-// 'B' adds 'horizontal lines, 'C' adds split vertical lines, and 'D' adds split horizontal lines. The slider controls the
+// 'B' adds horizontal lines, 'C' adds split vertical lines, and 'D' adds split horizontal lines. The text field controls the
 // number of patches that are coloured. Play around with the buttons to get different compositions.
 //
 // DEPENDENCIES
@@ -10,22 +10,47 @@
 //
 // USAGE
 // Double click to open the sketch in the Processing IDE, or otherwise open it in anything else that can run processing.
-// Run the sketch. Toy around with it to see what it does. Note the visual grammar given under DESCRIPTION
+// Run the sketch. Click on the rule text box to edit rules (type A/B/C/D). Click on percent box to edit percentage.
+// Press ENTER to generate a new composition based on the rule string.
+// Press S to save PNG and/or SVG (see booleans at top). Click PNG/SVG buttons to export (buttons override booleans).
 //
 // Creative Commons Share-Alike Attribution, by Richard Alexander Hall 2026-05-08, ported as noted from another
 // developer under DESCRIPTION.
 //
 //
 // CODE
+String scriptVersion = "1.2.0"
+
+import processing.svg.*;
 import java.util.Collections;
+import java.util.Calendar;
+
+// Export settings - set these to true to enable auto-export on 's' key
+boolean exportPNG = true;
+boolean exportSVG = true;
+
+// Layout settings - adjust these for different canvas sizes
+int artWidth = 640;      // Width of the Mondrian artwork
+int artHeight = 800;     // Height of the Mondrian artwork
+int uiPanelHeight = 100; // Height of the UI panel at bottom
+
+// Calculated dimensions - these will be set in settings()
+int canvasWidth;
+int canvasHeight;
 
 String rule = "AABBCCDDDDDD";
-String s = rule;
+String ruleInput = rule;  // For text input
 int blinkTime;
 boolean blinkOn;
 boolean slide;
-float keep = 0.5; 
-float sl = (20 + 320)/2;
+float keep = 0.5;
+String percentText = "50";  // Text for percentage input
+
+// Text input focus management
+boolean focusRule = true;
+boolean focusPercent = false;
+int cursorBlinkTime;
+boolean cursorVisible;
 
 // Using ArrayLists for dynamic arrays
 ArrayList<Integer> A_gr, B_gr;
@@ -37,16 +62,25 @@ ArrayList<Integer> xs1, ys1, xs2, ys2;
 ArrayList<Integer> rec_col;
 ArrayList<Integer> num;
 
-int n, m, k, u;
 int rec_c;
 
+void settings() {
+  // Calculate canvas dimensions BEFORE setting size
+  canvasWidth = artWidth;
+  canvasHeight = artHeight + uiPanelHeight;
+  size(canvasWidth, canvasHeight);
+}
+
 void setup() {
-  size(800, 930);
   background(251, 252, 244);
   
   blinkTime = millis();
+  cursorBlinkTime = millis();
   blinkOn = true;
+  cursorVisible = true;
   slide = false;
+  focusRule = true;  // Start with rule input focused
+  focusPercent = false;
   
   crv();
   patch();
@@ -276,9 +310,7 @@ void colour() {
   }
 }
 
-void draw() {
-  background(251, 252, 244);
-  
+void drawArtwork(int offsetX, int offsetY, int sizeMultiplier) {
   // Draw colored patches
   for (int h = 0; h < xs1.size(); h++) {
     rectMode(CORNERS);
@@ -288,7 +320,10 @@ void draw() {
     else if (g < 7) fill(247, 0, 4);
     else if (g < 10) fill(4, 4, 160);
     else fill(26, 20, 20);
-    rect(xs1.get(h) * 25, ys1.get(h) * 25, xs2.get(h) * 25, ys2.get(h) * 25);
+    rect(offsetX + xs1.get(h) * sizeMultiplier, 
+         offsetY + ys1.get(h) * sizeMultiplier, 
+         offsetX + xs2.get(h) * sizeMultiplier, 
+         offsetY + ys2.get(h) * sizeMultiplier);
   }
   
   // Draw lines
@@ -297,129 +332,326 @@ void draw() {
   strokeCap(SQUARE);
   
   for (int kk = 0; kk < A_add.size(); kk++) {
-    line(A_add.get(kk) * 25, 0, A_add.get(kk) * 25, 800);
+    line(offsetX + A_add.get(kk) * sizeMultiplier, offsetY, 
+         offsetX + A_add.get(kk) * sizeMultiplier, offsetY + artHeight);
   }
   for (int kk = 0; kk < B_add.size(); kk++) {
-    line(0, B_add.get(kk) * 25, 800, B_add.get(kk) * 25);
+    line(offsetX, offsetY + B_add.get(kk) * sizeMultiplier, 
+         offsetX + artWidth, offsetY + B_add.get(kk) * sizeMultiplier);
   }
   for (int kk = 0; kk < C_add.size(); kk++) {
-    line(C_add.get(kk) * 25, C_st.get(kk) * 25, C_add.get(kk) * 25, C_ed.get(kk) * 25);
+    line(offsetX + C_add.get(kk) * sizeMultiplier, offsetY + C_st.get(kk) * sizeMultiplier,
+         offsetX + C_add.get(kk) * sizeMultiplier, offsetY + C_ed.get(kk) * sizeMultiplier);
   }
   for (int kk = 0; kk < D_add.size(); kk++) {
-    line(D_st.get(kk) * 25, D_add.get(kk) * 25, D_ed.get(kk) * 25, D_add.get(kk) * 25);
+    line(offsetX + D_st.get(kk) * sizeMultiplier, offsetY + D_add.get(kk) * sizeMultiplier,
+         offsetX + D_ed.get(kk) * sizeMultiplier, offsetY + D_add.get(kk) * sizeMultiplier);
+  }
+}
+
+void draw() {
+  background(251, 252, 244);
+  
+  // Draw the artwork
+  drawArtwork(0, 0, 25);
+  
+  // Update cursor blink
+  if (millis() - cursorBlinkTime > 500) {
+    cursorBlinkTime = millis();
+    cursorVisible = !cursorVisible;
   }
   
-  // UI panel
+  // Draw UI panel
+  int uiY = artHeight;
   rectMode(CORNERS);
   noStroke();
-  fill(220);
-  rect(0, 800, width, 900);
+  fill(50);
+  rect(0, uiY, width, height);
   
-  fill(190);
-  rect(width-80, 820, width-20, 880);
-  rect(width-160, 820, width-100, 880);
-  rect(width-240, 820, width-180, 880);
-  rect(width-320, 820, width-260, 880);
+  // Button dimensions (responsive)
+  int buttonWidth = 70;
+  int buttonHeight = 28;
+  int buttonSpacing = 10;
+  int startX = width - (buttonWidth * 4 + buttonSpacing * 3);
+  int row1Y = uiY + 12;
+  int row2Y = uiY + 50;
+  
+  // Row 1 buttons - dark gray
+  fill(80);
+  rect(startX, row1Y, startX + buttonWidth, row1Y + buttonHeight);
+  rect(startX + buttonWidth + buttonSpacing, row1Y, startX + buttonWidth * 2 + buttonSpacing, row1Y + buttonHeight);
+  rect(startX + (buttonWidth + buttonSpacing) * 2, row1Y, startX + buttonWidth * 3 + buttonSpacing * 2, row1Y + buttonHeight);
+  rect(startX + (buttonWidth + buttonSpacing) * 3, row1Y, startX + buttonWidth * 4 + buttonSpacing * 3, row1Y + buttonHeight);
   
   fill(255);
-  textSize(12);
-  textAlign(CENTER, BOTTOM);
-  text("RESET", width-50, 850);
-  text("SHUFFLE", width-130, 850);
-  text("SHUFFLE", width-210, 850);
-  text("SHUFFLE", width-290, 850);
-  textAlign(CENTER, TOP);
-  text("ALL", width-50, 850);
-  text("CURVE", width-130, 850);
-  text("PATCH", width-210, 850);
-  text("COLOUR", width-290, 850);
+  textSize(10);
+  textAlign(CENTER, CENTER);
+  text("RESET ALL", startX + buttonWidth/2, row1Y + buttonHeight/2);
+  text("SHUFFLE\nCURVE", startX + buttonWidth + buttonSpacing + buttonWidth/2, row1Y + buttonHeight/2);
+  text("SHUFFLE\nPATCH", startX + (buttonWidth + buttonSpacing) * 2 + buttonWidth/2, row1Y + buttonHeight/2);
+  text("SHUFFLE\nCOLOUR", startX + (buttonWidth + buttonSpacing) * 3 + buttonWidth/2, row1Y + buttonHeight/2);
   
-  // Ruleset display
+  // Row 2 export buttons
+  fill(80);
+  rect(startX, row2Y, startX + buttonWidth, row2Y + buttonHeight);
+  rect(startX + buttonWidth + buttonSpacing, row2Y, startX + buttonWidth * 2 + buttonSpacing, row2Y + buttonHeight);
+  
   fill(255);
-  rect(20, 820, 320, 845);
-  rect(20, 855, 320, 880);
+  text("EXPORT PNG", startX + buttonWidth/2, row2Y + buttonHeight/2);
+  text("EXPORT SVG", startX + buttonWidth + buttonSpacing + buttonWidth/2, row2Y + buttonHeight/2);
+  
+  // Input area - Ruleset and Percentage side by side
+  int inputX = 20;
+  int inputY = uiY + 12;
+  int ruleWidth = 180;
+  int percentWidth = 60;
+  int inputHeight = 28;
+  int spacing = 10;
+  
+  // Ruleset input box - highlight if focused
+  if (focusRule) {
+    stroke(100);
+    strokeWeight(2);
+  } else {
+    noStroke();
+  }
+  fill(255);
+  rect(inputX, inputY, inputX + ruleWidth, inputY + inputHeight);
   
   fill(0);
   textAlign(LEFT, CENTER);
-  text(s, 25, 832);
+  textSize(11);
+  text(ruleInput, inputX + 5, inputY + inputHeight/2);
   
-  fill(100);
-  text("RULESET (E TO ERASE", 327, 826);
-  text("ENTER TO EXECUTE)", 327, 842);
-  text("% COLOURED PATCH", 327, 867);
-  text("0", 25, 867);
-  text("100", 294, 867);
-  
-  // Slider
-  fill(190);
-  rectMode(CENTER);
-  rect(sl, (855+880)/2, 17, 17);
-  rectMode(CORNERS);
-  
-  // Blinking cursor
-  stroke(0);
-  strokeWeight(1);
-  float textW = textWidth(s);
-  if (blinkOn) line(25 + textW + 1, 830-7, 25 + textW + 1, 830+10);
-  if (millis() - 500 > blinkTime) {
-    blinkTime = millis();
-    blinkOn = !blinkOn;
+  // Draw cursor in rule field if focused
+  if (focusRule && cursorVisible) {
+    float textW = textWidth(ruleInput);
+    stroke(0);
+    strokeWeight(1);
+    line(inputX + 5 + textW, inputY + 5, 
+         inputX + 5 + textW, inputY + inputHeight - 5);
   }
   
-  // Bottom instructions
+  // Percentage text box - highlight if focused (no % sign inside box)
   noStroke();
+  if (focusPercent) {
+    stroke(100);
+    strokeWeight(2);
+  } else {
+    noStroke();
+  }
+  fill(255);
+  rect(inputX + ruleWidth + spacing, inputY, inputX + ruleWidth + spacing + percentWidth, inputY + inputHeight);
+  
   fill(0);
-  rect(0, 900, width, height);
-  fill(200);
   textAlign(CENTER, CENTER);
-  text("A - Vertical Line | B - Horizontal Line | C - Split Vertical Line | D - Split Horizontal Line", width/2, 915);
-}
-
-void mouseDragged() {
-  if (mouseX < sl+12.5 && mouseX > sl-12.5 && mouseY < (855+880)/2 + 12.5 && mouseY > (855+880)/2 - 12.5) {
-    sl = constrain(mouseX, 32.5, 307.5);
-    slide = true;
+  text(percentText, inputX + ruleWidth + spacing + percentWidth/2, inputY + inputHeight/2);
+  
+  // Draw cursor in percent field if focused
+  if (focusPercent && cursorVisible) {
+    float textW = textWidth(percentText);
+    stroke(0);
+    strokeWeight(1);
+    // Position cursor after the text
+    line(inputX + ruleWidth + spacing + percentWidth/2 + textW/2, inputY + 5,
+         inputX + ruleWidth + spacing + percentWidth/2 + textW/2, inputY + inputHeight - 5);
   }
-}
-
-void mouseReleased() {
-  keep = 1 - (307.5 - sl) / (307.5 - 32.5);
-  if (slide) {
-    patch();
-    slide = false;
-  }
+  
+  // Labels
+  noStroke();
+  fill(200);
+  textSize(9);
+  textAlign(LEFT, CENTER);
+  text("Rule String (type anything, ENTER strips non-A/B/C/D)", inputX, inputY + inputHeight + 12);
+  text("Fill %", inputX + ruleWidth + spacing, inputY + inputHeight + 12);
+  
+  // Instructions
+  textAlign(CENTER, CENTER);
+  textSize(9);
+  text("S - Save PNG/SVG (see booleans at top of code)", width/2, height - 12);
 }
 
 void mouseClicked() {
-  if (mouseX > width-80 && mouseX < width-20 && mouseY > 820 && mouseY < height-20) {
+  int uiY = artHeight;
+  int buttonWidth = 70;
+  int buttonSpacing = 10;
+  int startX = width - (buttonWidth * 4 + buttonSpacing * 3);
+  int row1Y = uiY + 12;
+  int row2Y = uiY + 50;
+  
+  // Check button clicks first
+  // RESET ALL
+  if (mouseX > startX && mouseX < startX + buttonWidth && mouseY > row1Y && mouseY < row1Y + 28) {
     rule = "AABBCCDDDDDD";
-    s = rule;
+    ruleInput = rule;
     keep = 0.5;
+    percentText = "50";
+    focusRule = true;
+    focusPercent = false;
     setup();
-    sl = (20+333)/2;
+    return;
   }
-  if (mouseX > width-320 && mouseX < width-260 && mouseY > 820 && mouseY < height-20) colour();
-  if (mouseX > width-240 && mouseX < width-180 && mouseY > 820 && mouseY < height-20) patch();
-  if (mouseX > width-160 && mouseX < width-100 && mouseY > 820 && mouseY < height-20) {
+  
+  // SHUFFLE CURVE
+  if (mouseX > startX + buttonWidth + buttonSpacing && mouseX < startX + buttonWidth * 2 + buttonSpacing && 
+      mouseY > row1Y && mouseY < row1Y + 28) {
     crv();
     patch();
+    return;
   }
-  if (mouseX > 32.5 && mouseX < 307.5 && mouseY > 855 && mouseY < 880) {
-    sl = mouseX;
-    slide = true;
-    mouseReleased();
+  
+  // SHUFFLE PATCH
+  if (mouseX > startX + (buttonWidth + buttonSpacing) * 2 && mouseX < startX + buttonWidth * 3 + buttonSpacing * 2 && 
+      mouseY > row1Y && mouseY < row1Y + 28) {
+    patch();
+    return;
   }
+  
+  // SHUFFLE COLOUR
+  if (mouseX > startX + (buttonWidth + buttonSpacing) * 3 && mouseX < startX + buttonWidth * 4 + buttonSpacing * 3 && 
+      mouseY > row1Y && mouseY < row1Y + 28) {
+    colour();
+    return;
+  }
+  
+  // PNG EXPORT button - overrides exportPNG boolean
+  if (mouseX > startX && mouseX < startX + buttonWidth && mouseY > row2Y && mouseY < row2Y + 28) {
+    exportToPNG();
+    return;
+  }
+  
+  // SVG EXPORT button - overrides exportSVG boolean
+  if (mouseX > startX + buttonWidth + buttonSpacing && mouseX < startX + buttonWidth * 2 + buttonSpacing && 
+      mouseY > row2Y && mouseY < row2Y + 28) {
+    exportToSVG();
+    return;
+  }
+  
+  // Check text box clicks
+  int inputX = 20;
+  int ruleWidth = 180;
+  int percentWidth = 60;
+  int spacing = 10;
+  int inputY = uiY + 12;
+  int inputHeight = 28;
+  
+  // Click on rule input box
+  if (mouseX > inputX && mouseX < inputX + ruleWidth && 
+      mouseY > inputY && mouseY < inputY + inputHeight) {
+    focusRule = true;
+    focusPercent = false;
+    cursorBlinkTime = millis();
+    cursorVisible = true;
+    return;
+  }
+  
+  // Click on percentage text box
+  if (mouseX > inputX + ruleWidth + spacing && mouseX < inputX + ruleWidth + spacing + percentWidth && 
+      mouseY > inputY && mouseY < inputY + inputHeight) {
+    focusRule = false;
+    focusPercent = true;
+    cursorBlinkTime = millis();
+    cursorVisible = true;
+    return;
+  }
+  
+  // Click anywhere else - remove focus
+  focusRule = false;
+  focusPercent = false;
 }
 
 void keyPressed() {
-  int len = s.length();
-  if ((key == 'e' || key == 'E') && len > 0) {
-    s = s.substring(0, s.length()-1);
-  } else if ((key == 'A' || key == 'a' || key == 'B' || key == 'b' || key == 'C' || key == 'c' || key == 'D' || key == 'd') && len < 32) {
-    char upper = Character.toUpperCase(key);
-    s = s + upper;
-  } else if (key == ENTER) {
-    rule = s;
-    setup();
+  // Handle input based on which field has focus
+  if (focusPercent) {
+    // Percentage input handling
+    if (key >= '0' && key <= '9') {
+      String newText = percentText;
+      if (newText.equals("0") && key != '0') {
+        newText = "" + key;
+      } else if (newText.length() < 3) {
+        newText = newText + key;
+      }
+      int percent = int(newText);
+      if (percent >= 0 && percent <= 100) {
+        percentText = newText;
+        keep = percent / 100.0;
+        patch();
+      }
+    } else if (key == BACKSPACE && percentText.length() > 0) {
+      percentText = percentText.substring(0, percentText.length() - 1);
+      if (percentText.length() == 0) percentText = "0";
+      int percent = int(percentText);
+      keep = percent / 100.0;
+      patch();
+    } else if (key == DELETE && percentText.length() > 0) {
+      percentText = percentText.substring(0, percentText.length() - 1);
+      if (percentText.length() == 0) percentText = "0";
+      int percent = int(percentText);
+      keep = percent / 100.0;
+      patch();
+    }
+  } else if (focusRule) {
+    // Rule input handling - accept ANY key and add to ruleInput
+    if (key == ENTER) {
+      // Validate and process rule input
+      String cleaned = "";
+      for (int i = 0; i < ruleInput.length(); i++) {
+        char c = Character.toUpperCase(ruleInput.charAt(i));
+        if (c == 'A' || c == 'B' || c == 'C' || c == 'D') {
+          cleaned += c;
+        }
+      }
+      if (cleaned.length() > 0) {
+        rule = cleaned;
+        ruleInput = cleaned;  // Update the display to show the cleaned rule
+        setup();
+      }
+    } else if (key == BACKSPACE && ruleInput.length() > 0) {
+      ruleInput = ruleInput.substring(0, ruleInput.length() - 1);
+    } else if (key == DELETE && ruleInput.length() > 0) {
+      ruleInput = ruleInput.substring(0, ruleInput.length() - 1);
+    } else if (key != CODED && key != ENTER && key != BACKSPACE && key != DELETE) {
+      // Add any typed character to ruleInput (will be filtered on ENTER)
+      if (ruleInput.length() < 32) {
+        ruleInput = ruleInput + key;
+      }
+    }
   }
+  
+  // S key for export (respects booleans) - works regardless of focus
+  if (key == 's' || key == 'S') {
+    if (exportPNG) exportToPNG();
+    if (exportSVG) exportToSVG();
+  }
+  
+  // Reset cursor blink on any keypress
+  cursorBlinkTime = millis();
+  cursorVisible = true;
+}
+
+String getTimestamp() {
+  Calendar cal = Calendar.getInstance();
+  return String.format("%04d_%02d_%02d_%02d_%02d_%02d",
+    cal.get(Calendar.YEAR),
+    cal.get(Calendar.MONTH) + 1,
+    cal.get(Calendar.DAY_OF_MONTH),
+    cal.get(Calendar.HOUR_OF_DAY),
+    cal.get(Calendar.MINUTE),
+    cal.get(Calendar.SECOND)
+  );
+}
+
+void exportToPNG() {
+  String timestamp = getTimestamp();
+  PImage artwork = get(0, 0, artWidth, artHeight);
+  artwork.save(timestamp + "_Mondrian_Processing.png");
+  println("Saved: " + timestamp + "_Mondrian_Processing.png");
+}
+
+void exportToSVG() {
+  String timestamp = getTimestamp();
+  beginRecord(SVG, timestamp + "_Mondrian_Processing.svg");
+  drawArtwork(0, 0, 25);
+  endRecord();
+  println("Saved: " + timestamp + "_Mondrian_Processing.svg");
 }
