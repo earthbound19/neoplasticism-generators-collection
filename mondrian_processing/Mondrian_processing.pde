@@ -27,7 +27,17 @@
 //
 //
 // CODE
-String scriptVersion = "1.9.36";
+// TO DO
+// - museum mode; only display artwork area, fullscreen, no UI controls, getting a new palette in the background
+//   for every new render, then doing the render when ready.
+// - in museum mode, every 7th iteration use default palette as Mondrian throwback?
+// - rapid creation mode (many renders and PNG + SVG saves up to N renders)
+// - CLI mode accepting a JSON config and dynamically patching settings
+//   - to start any mode thereby also?
+//   - to override globals like dimensions
+//   - to override palette, specifying the config as "source" in written metadata
+
+String scriptVersion = "2.0.0";
 String scriptName = "Mondrian_Processing";
 String paletteSource = "default";
 String lastAPIPaletteName = "";
@@ -57,9 +67,6 @@ float minLineDistance;   // Minimum distance between lines (lineWeight * 2)
 
 String rule = "AABBCCDDDDDD";
 String ruleInput = rule;
-int blinkTime;
-boolean blinkOn;
-boolean slide;
 float keep = 0.5;
 String percentText = "50";
 String colorCountText = "0";
@@ -106,37 +113,33 @@ ArrayList<Integer> ys2;
 ArrayList<Integer> rec_col;
 ArrayList<Integer> num;
 
-int rec_c;
-
 void settings() {
-  // CRITICAL: Disable automatic pixel scaling
   pixelDensity(1);
   
   canvasWidth = artWidth;
   canvasHeight = artHeight + uiPanelHeight;
-  size(canvasWidth, canvasHeight);
+  
+  size(canvasWidth, canvasHeight, P2D);
+  
+  // Disable global smoothing
+  noSmooth();
 }
 
 void setup() {
   surface.setTitle(scriptName + " v" + scriptVersion);
+
   background(251, 252, 244);
   
   // Calculate dynamic grid based on canvas proportions
   calculateGrid();
   minLineDistance = lineWeight * 2; // Minimum pixels between line centers
   
-  // Disable anti-aliasing for pixel-perfect line rendering
-  hint(ENABLE_STROKE_PURE);
-  
   if (fullPalette == null) {
     initDefaultPalette();
   }
   
-  blinkTime = millis();
   cursorBlinkTime = millis();
-  blinkOn = true;
   cursorVisible = true;
-  slide = false;
   focusRule = true;
   focusPercent = false;
   focusColorCount = false;
@@ -145,6 +148,12 @@ void setup() {
   patch();
   updateActivePalette();
   colour();
+
+  // CRITICAL FIX: Force nearest-neighbor sampling
+  // This completely disables anti-aliasing for
+  // all geometry, which was causing inconsistent
+  // line (black box) width appearance:
+  ((PGraphicsOpenGL)g).textureSampling(2);
 }
 
 void calculateGrid() {
@@ -520,6 +529,29 @@ void colour() {
   }
 }
 
+// Draw a black box (rectangle) representing a line segment - REPLACES line() calls
+void drawLineBox(float x1, float y1, float x2, float y2, float thickness) {
+  float halfThick = thickness / 2.0f;
+  
+  rectMode(CORNERS);
+  noStroke();
+  fill(0);
+  
+  if (abs(x1 - x2) < 0.1) {
+    // Vertical box - force integer coordinates
+    float centerX = round(x1);
+    float top = round(y1);
+    float bottom = round(y2);
+    rect(centerX - halfThick, top, centerX + halfThick, bottom);
+  } else if (abs(y1 - y2) < 0.1) {
+    // Horizontal box - force integer coordinates
+    float centerY = round(y1);
+    float left = round(x1);
+    float right = round(x2);
+    rect(left, centerY - halfThick, right, centerY + halfThick);
+  }
+}
+
 void drawArtwork() {
   // Draw colored patches
   for (int h = 0; h < xs1.size(); h++) {
@@ -531,52 +563,42 @@ void drawArtwork() {
     } else {
       fill(200);
     }
-    rect(getX(xs1.get(h)), getY(ys1.get(h)), getX(xs2.get(h)), getY(ys2.get(h)));
+    
+    float rx1 = round(getX(xs1.get(h)));
+    float ry1 = round(getY(ys1.get(h)));
+    float rx2 = round(getX(xs2.get(h)));
+    float ry2 = round(getY(ys2.get(h)));
+    rect(rx1, ry1, rx2, ry2);
   }
   
-  // CRITICAL: Disable anti-aliasing for perfect line rendering
-  hint(DISABLE_OPTIMIZED_STROKE);
+  // Draw grid lines as boxes
+  fill(0);
+  noStroke();
+  float halfThick = lineWeight / 2.0f;
   
-  // Draw lines with exact integer coordinates
-  stroke(0);
-  strokeWeight(lineWeight);
-  strokeCap(SQUARE);
-  strokeJoin(MITER);
-  
-  // Force no smoothing on lines
-  noSmooth();
-  
-  // Full vertical lines
   for (int kk = 0; kk < A_add.size(); kk++) {
-    float x = getX(A_add.get(kk));
-    line(x, 0, x, artHeight);
+    float x = round(getX(A_add.get(kk)));
+    rect(x - halfThick, 0, x + halfThick, artHeight);
   }
   
-  // Full horizontal lines
   for (int kk = 0; kk < B_add.size(); kk++) {
-    float y = getY(B_add.get(kk));
-    line(0, y, artWidth, y);
+    float y = round(getY(B_add.get(kk)));
+    rect(0, y - halfThick, artWidth, y + halfThick);
   }
   
-  // Segmented vertical lines
   for (int kk = 0; kk < C_add.size(); kk++) {
-    float x = getX(C_add.get(kk));
-    float y1 = getY(C_st.get(kk));
-    float y2 = getY(C_ed.get(kk));
-    line(x, y1, x, y2);
+    float x = round(getX(C_add.get(kk)));
+    float y1 = round(getY(C_st.get(kk)));
+    float y2 = round(getY(C_ed.get(kk)));
+    rect(x - halfThick, y1, x + halfThick, y2);
   }
   
-  // Segmented horizontal lines
   for (int kk = 0; kk < D_add.size(); kk++) {
-    float x1 = getX(D_st.get(kk));
-    float x2 = getX(D_ed.get(kk));
-    float y = getY(D_add.get(kk));
-    line(x1, y, x2, y);
+    float x1 = round(getX(D_st.get(kk)));
+    float x2 = round(getX(D_ed.get(kk)));
+    float y = round(getY(D_add.get(kk)));
+    rect(x1, y - halfThick, x2, y + halfThick);
   }
-  
-  // Re-enable smooth for UI text
-  smooth();
-  hint(ENABLE_OPTIMIZED_STROKE);
 }
 
 void draw() {
@@ -1036,31 +1058,37 @@ void exportToSVG() {
                    "\" fill=\"" + hexColor + "\" stroke=\"none\"/>");
   }
   
-  // Draw all lines with SQUARE caps and MITER joins
-  output.println("  <g stroke=\"#000000\" stroke-width=\"" + lineWeight + "\" stroke-linecap=\"square\" stroke-linejoin=\"miter\" fill=\"none\">");
+  // Draw all grid lines as black RECTANGLES (not strokes) for perfect alignment in SVG
+  output.println("  <g fill=\"#000000\" stroke=\"none\">");
   
+  float halfThick = lineWeight / 2.0f;
+  
+  // Full vertical lines (boxes)
   for (int kk = 0; kk < A_add.size(); kk++) {
     float x = getX(A_add.get(kk));
-    output.println("    <line x1=\"" + x + "\" y1=\"0\" x2=\"" + x + "\" y2=\"" + artHeight + "\"/>");
+    output.println("    <rect x=\"" + (x - halfThick) + "\" y=\"0\" width=\"" + lineWeight + "\" height=\"" + artHeight + "\"/>");
   }
   
+  // Full horizontal lines (boxes)
   for (int kk = 0; kk < B_add.size(); kk++) {
     float y = getY(B_add.get(kk));
-    output.println("    <line x1=\"0\" y1=\"" + y + "\" x2=\"" + artWidth + "\" y2=\"" + y + "\"/>");
+    output.println("    <rect x=\"0\" y=\"" + (y - halfThick) + "\" width=\"" + artWidth + "\" height=\"" + lineWeight + "\"/>");
   }
   
+  // Segmented vertical lines (boxes)
   for (int kk = 0; kk < C_add.size(); kk++) {
     float x = getX(C_add.get(kk));
     float y1 = getY(C_st.get(kk));
     float y2 = getY(C_ed.get(kk));
-    output.println("    <line x1=\"" + x + "\" y1=\"" + y1 + "\" x2=\"" + x + "\" y2=\"" + y2 + "\"/>");
+    output.println("    <rect x=\"" + (x - halfThick) + "\" y=\"" + y1 + "\" width=\"" + lineWeight + "\" height=\"" + (y2 - y1) + "\"/>");
   }
   
+  // Segmented horizontal lines (boxes)
   for (int kk = 0; kk < D_add.size(); kk++) {
     float x1 = getX(D_st.get(kk));
     float x2 = getX(D_ed.get(kk));
     float y = getY(D_add.get(kk));
-    output.println("    <line x1=\"" + x1 + "\" y1=\"" + y + "\" x2=\"" + x2 + "\" y2=\"" + y + "\"/>");
+    output.println("    <rect x=\"" + x1 + "\" y=\"" + (y - halfThick) + "\" width=\"" + (x2 - x1) + "\" height=\"" + lineWeight + "\"/>");
   }
   
   output.println("  </g>");
