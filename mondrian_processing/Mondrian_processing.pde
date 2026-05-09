@@ -1,9 +1,17 @@
 // DESCRIPTION
-// Mondrian Composition Generator
 // Ported from p5js (OpenProcessing sketch 381152) by Queen Bee Art to desktop Processing: https://www.openprocessing.org/sketch/381152/
 // From information metadata at source: (Piet) Mondrian compositions computed using shape grammar. 'A' adds vertical lines,
 // 'B' adds horizontal lines, 'C' adds split vertical lines, and 'D' adds split horizontal lines. The text field controls the
 // number of patches that are coloured. Play around with the buttons to get different compositions.
+//
+// ADDITIONAL FEATURES
+// Features have been added since that base port:
+// - update to dynamic grid system that keeps grid division (resultant cells) roughly (or exactly) square for any canvas aspect ratio
+// - implement color palette retrieval from a palette collection API: https://earthbound.io/data/random_ebPalette/ -- via button press
+//   - with color subset selection with color count text field (0 = all colors)
+// - add PNG and SVG export with full metadata (grammar, grid, palette name / URL)
+// - add line collision avoidance to prevent overlapping/clustered lines
+// - redesign UI with buttons for new features and better contrast
 //
 // DEPENDENCIES
 // Processing
@@ -19,76 +27,257 @@
 //
 //
 // CODE
-String scriptVersion = "1.2.0"
+String scriptVersion = "1.9.36";
+String scriptName = "Mondrian_Processing";
+String paletteSource = "default";
+String lastAPIPaletteName = "";
+String lastAPIPaletteURL = "";
 
 import processing.svg.*;
 import java.util.Collections;
 import java.util.Calendar;
 
-// Export settings - set these to true to enable auto-export on 's' key
+// Export settings
 boolean exportPNG = true;
 boolean exportSVG = true;
 
-// Layout settings - adjust these for different canvas sizes
-int artWidth = 640;      // Width of the Mondrian artwork
-int artHeight = 800;     // Height of the Mondrian artwork
-int uiPanelHeight = 100; // Height of the UI panel at bottom
+// Layout settings - DYNAMIC GRID
+int artWidth = 720;      // Width of the Mondrian artwork
+int artHeight = 842;     // Height of the Mondrian artwork
+int gridSizeReference = 32;  // Reference grid size for the shorter dimension
+int uiPanelHeight = 135; // Height of the UI panel at bottom
 
-// Calculated dimensions - these will be set in settings()
+// Calculated dimensions
 int canvasWidth;
 int canvasHeight;
+int gridSizeX;           // Number of horizontal divisions
+int gridSizeY;           // Number of vertical divisions
+float lineWeight = 7;    // Line thickness in pixels
+float minLineDistance;   // Minimum distance between lines (lineWeight * 2)
 
 String rule = "AABBCCDDDDDD";
-String ruleInput = rule;  // For text input
+String ruleInput = rule;
 int blinkTime;
 boolean blinkOn;
 boolean slide;
 float keep = 0.5;
-String percentText = "50";  // Text for percentage input
+String percentText = "50";
+String colorCountText = "0";
 
-// Text input focus management
+// Text input focus
 boolean focusRule = true;
 boolean focusPercent = false;
+boolean focusColorCount = false;
 int cursorBlinkTime;
 boolean cursorVisible;
 
-// Using ArrayLists for dynamic arrays
-ArrayList<Integer> A_gr, B_gr;
-ArrayList<Integer> A_add, B_add;
-ArrayList<Integer> C_add, C_st, C_ed;
-ArrayList<Integer> D_add, D_st, D_ed;
-ArrayList<Integer> x1, y1, x2, y2;
-ArrayList<Integer> xs1, ys1, xs2, ys2;
+// Color palette system
+color[] fullPalette;
+color[] activePalette;
+
+color[] defaultPalette = {
+  #FFF700,  // yellow
+  #F70004,  // red
+  #0404A0,  // blue
+  #1A1414   // dark gray
+};
+
+String apiURL = "https://earthbound.io/data/random_ebPalette/";
+
+// ArrayLists for dynamic arrays
+ArrayList<Integer> A_gr;
+ArrayList<Integer> B_gr;
+ArrayList<Integer> A_add;
+ArrayList<Integer> B_add;
+ArrayList<Integer> C_add;
+ArrayList<Integer> C_st;
+ArrayList<Integer> C_ed;
+ArrayList<Integer> D_add;
+ArrayList<Integer> D_st;
+ArrayList<Integer> D_ed;
+ArrayList<Integer> x1;
+ArrayList<Integer> y1;
+ArrayList<Integer> x2;
+ArrayList<Integer> y2;
+ArrayList<Integer> xs1;
+ArrayList<Integer> ys1;
+ArrayList<Integer> xs2;
+ArrayList<Integer> ys2;
 ArrayList<Integer> rec_col;
 ArrayList<Integer> num;
 
 int rec_c;
 
 void settings() {
-  // Calculate canvas dimensions BEFORE setting size
+  // CRITICAL: Disable automatic pixel scaling
+  pixelDensity(1);
+  
   canvasWidth = artWidth;
   canvasHeight = artHeight + uiPanelHeight;
   size(canvasWidth, canvasHeight);
 }
 
 void setup() {
+  surface.setTitle(scriptName + " v" + scriptVersion);
   background(251, 252, 244);
+  
+  // Calculate dynamic grid based on canvas proportions
+  calculateGrid();
+  minLineDistance = lineWeight * 2; // Minimum pixels between line centers
+  
+  // Disable anti-aliasing for pixel-perfect line rendering
+  hint(ENABLE_STROKE_PURE);
+  
+  if (fullPalette == null) {
+    initDefaultPalette();
+  }
   
   blinkTime = millis();
   cursorBlinkTime = millis();
   blinkOn = true;
   cursorVisible = true;
   slide = false;
-  focusRule = true;  // Start with rule input focused
+  focusRule = true;
   focusPercent = false;
+  focusColorCount = false;
   
   crv();
   patch();
+  updateActivePalette();
   colour();
 }
 
+void calculateGrid() {
+  if (artWidth <= artHeight) {
+    // Width is the shorter or equal dimension
+    float cellSize = (float)artWidth / (float)gridSizeReference;
+    gridSizeX = gridSizeReference;
+    gridSizeY = Math.round((float)artHeight / cellSize);
+  } else {
+    // Height is the shorter dimension
+    float cellSize = (float)artHeight / (float)gridSizeReference;
+    gridSizeY = gridSizeReference;
+    gridSizeX = Math.round((float)artWidth / cellSize);
+  }
+  
+  // Ensure we have at least 2 divisions so lines can be placed
+  if (gridSizeX < 2) gridSizeX = 2;
+  if (gridSizeY < 2) gridSizeY = 2;
+  
+  println("Canvas: " + artWidth + "x" + artHeight);
+  println("Grid: " + gridSizeX + " x " + gridSizeY);
+  println("Cell size: ~" + ((float)artWidth / gridSizeX) + "px x " + ((float)artHeight / gridSizeY) + "px");
+}
+
+float getX(int gridPos) {
+  return (float)gridPos * (float)artWidth / (float)gridSizeX;
+}
+
+float getY(int gridPos) {
+  return (float)gridPos * (float)artHeight / (float)gridSizeY;
+}
+
+// Check if a vertical line at gridX would be too close to existing vertical lines
+boolean isVerticalLineTooClose(int gridX, ArrayList<Integer> existingLines) {
+  float pixelX = getX(gridX);
+  for (int existing : existingLines) {
+    float existingPixelX = getX(existing);
+    if (Math.abs(pixelX - existingPixelX) < minLineDistance) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Check if a horizontal line at gridY would be too close to existing horizontal lines
+boolean isHorizontalLineTooClose(int gridY, ArrayList<Integer> existingLines) {
+  float pixelY = getY(gridY);
+  for (int existing : existingLines) {
+    float existingPixelY = getY(existing);
+    if (Math.abs(pixelY - existingPixelY) < minLineDistance) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void initDefaultPalette() {
+  fullPalette = new color[defaultPalette.length];
+  for (int i = 0; i < defaultPalette.length; i++) {
+    fullPalette[i] = defaultPalette[i];
+  }
+  paletteSource = "default";
+  lastAPIPaletteName = "";
+  lastAPIPaletteURL = "";
+  colorCountText = str(fullPalette.length);
+  updateActivePalette();
+  println("Using default palette with " + fullPalette.length + " colors");
+}
+
+void updateActivePalette() {
+  int limit = int(colorCountText);
+  if (limit <= 0 || limit >= fullPalette.length) {
+    activePalette = new color[fullPalette.length];
+    for (int i = 0; i < fullPalette.length; i++) {
+      activePalette[i] = fullPalette[i];
+    }
+    println("Using all " + fullPalette.length + " colors");
+  } else {
+    ArrayList<Integer> indices = new ArrayList<Integer>();
+    for (int i = 0; i < fullPalette.length; i++) {
+      indices.add(i);
+    }
+    Collections.shuffle(indices);
+    
+    activePalette = new color[limit];
+    for (int i = 0; i < limit; i++) {
+      activePalette[i] = fullPalette[indices.get(i)];
+    }
+    println("Using " + limit + " random colors from palette of " + fullPalette.length);
+  }
+}
+
+void fetchColorsFromAPI() {
+  println("Fetching colors from earthbound.io API...");
+  Thread t = new Thread(new Runnable() {
+    public void run() {
+      try {
+        JSONObject json = loadJSONObject(apiURL);
+        JSONArray colorArray = json.getJSONArray("colors");
+        
+        // Extract metadata
+        lastAPIPaletteName = json.getString("paletteName");
+        lastAPIPaletteURL = json.getString("textSourceURL");
+        
+        color[] newPalette = new color[colorArray.size()];
+        for (int i = 0; i < colorArray.size(); i++) {
+          String hexColor = colorArray.getString(i);
+          newPalette[i] = unhex("FF" + hexColor.substring(1));
+        }
+        
+        fullPalette = new color[newPalette.length];
+        for (int i = 0; i < newPalette.length; i++) {
+          fullPalette[i] = newPalette[i];
+        }
+        paletteSource = "api";
+        colorCountText = str(fullPalette.length);
+        updateActivePalette();
+        colour();
+        
+        println("Successfully loaded " + fullPalette.length + " colors from API");
+        println("Palette name: " + lastAPIPaletteName);
+        println("Palette URL: " + lastAPIPaletteURL);
+      } catch (Exception e) {
+        println("API fetch failed: " + e.getMessage());
+        lastAPIPaletteName = "";
+        lastAPIPaletteURL = "";
+      }
+    }
+  });
+  t.start();
+}
+
 void crv() {
-  // Initialize all ArrayLists
   A_gr = new ArrayList<Integer>();
   B_gr = new ArrayList<Integer>();
   A_add = new ArrayList<Integer>();
@@ -104,21 +293,22 @@ void crv() {
   x2 = new ArrayList<Integer>();
   y2 = new ArrayList<Integer>();
   
-  // First rectangle as canvas (0,0) to (32,32)
+  // First rectangle as canvas (0,0) to (gridSizeX, gridSizeY)
   x1.add(0);
   y1.add(0);
-  x2.add(32);
-  y2.add(32);
+  x2.add(gridSizeX);
+  y2.add(gridSizeY);
   
-  // Fill A_gr and B_gr with values 1..31
-  for (int i = 1; i <= 31; i++) {
+  // Fill A_gr with values 1..gridSizeX-1 (possible vertical split positions)
+  // Fill B_gr with values 1..gridSizeY-1 (possible horizontal split positions)
+  for (int i = 1; i < gridSizeX; i++) {
     A_gr.add(i);
+  }
+  for (int i = 1; i < gridSizeY; i++) {
     B_gr.add(i);
   }
   
-  // Process each character in the rule
   for (int charIdx = 0; charIdx < rule.length(); charIdx++) {
-    // Ensure rectangles have correct orientation (x1 <= x2, y1 <= y2)
     for (int f = 0; f < x1.size(); f++) {
       if (x1.get(f) > x2.get(f)) {
         int dum = x2.get(f);
@@ -134,13 +324,23 @@ void crv() {
     
     char c = rule.charAt(charIdx);
     if (c == 'A') {
-      // Add a vertical line
+      // Add a vertical line with collision avoidance
       if (A_gr.size() == 0) continue;
-      int r_a = (int)random(A_gr.size());
-      int val = A_gr.get(r_a);
+      
+      // Find valid positions not too close to existing lines
+      ArrayList<Integer> validPositions = new ArrayList<Integer>();
+      for (int pos : A_gr) {
+        if (!isVerticalLineTooClose(pos, A_add)) {
+          validPositions.add(pos);
+        }
+      }
+      
+      // If no valid positions, fall back to any position
+      ArrayList<Integer> sourceList = validPositions.size() > 0 ? validPositions : A_gr;
+      int r_a = (int)random(sourceList.size());
+      int val = sourceList.get(r_a);
       A_add.add(val);
       
-      // Split rectangles that contain this x coordinate
       int rectCount = x1.size();
       for (int j = 0; j < rectCount; j++) {
         if (x1.get(j) < val && x2.get(j) > val) {
@@ -151,13 +351,24 @@ void crv() {
           x2.set(j, val);
         }
       }
-      A_gr.remove(r_a);
+      A_gr.remove(Integer.valueOf(val));
       
     } else if (c == 'B') {
-      // Add a horizontal line
+      // Add a horizontal line with collision avoidance
       if (B_gr.size() == 0) continue;
-      int r_b = (int)random(B_gr.size());
-      int val = B_gr.get(r_b);
+      
+      // Find valid positions not too close to existing lines
+      ArrayList<Integer> validPositions = new ArrayList<Integer>();
+      for (int pos : B_gr) {
+        if (!isHorizontalLineTooClose(pos, B_add)) {
+          validPositions.add(pos);
+        }
+      }
+      
+      // If no valid positions, fall back to any position
+      ArrayList<Integer> sourceList = validPositions.size() > 0 ? validPositions : B_gr;
+      int r_b = (int)random(sourceList.size());
+      int val = sourceList.get(r_b);
       B_add.add(val);
       
       int rectCount = y1.size();
@@ -170,16 +381,16 @@ void crv() {
           y2.set(w, val);
         }
       }
-      B_gr.remove(r_b);
+      B_gr.remove(Integer.valueOf(val));
       
     } else if (c == 'C') {
       // Add a split vertical line
       if (A_gr.size() == 0) continue;
+      
       int r_c = (int)random(A_gr.size());
       int val = A_gr.get(r_c);
       
       if (B_add.size() + D_add.size() == 0) {
-        // No horizontal lines yet – behave like A
         A_add.add(val);
         int rectCount = x1.size();
         for (int j = 0; j < rectCount; j++) {
@@ -204,7 +415,7 @@ void crv() {
             }
           }
         }
-        C_cont.add(32);
+        C_cont.add(gridSizeY);
         Collections.sort(C_cont);
         int C_pick = (int)random(1, C_cont.size() - 1);
         C_st.add(C_cont.get(C_pick - 1));
@@ -227,11 +438,11 @@ void crv() {
     } else if (c == 'D') {
       // Add a split horizontal line
       if (B_gr.size() == 0) continue;
+      
       int r_d = (int)random(B_gr.size());
       int val = B_gr.get(r_d);
       
       if (A_add.size() + C_add.size() == 0) {
-        // No vertical lines yet – behave like B
         B_add.add(val);
         int rectCount = y1.size();
         for (int w = 0; w < rectCount; w++) {
@@ -256,7 +467,7 @@ void crv() {
             }
           }
         }
-        D_cont.add(32);
+        D_cont.add(gridSizeX);
         Collections.sort(D_cont);
         int D_pick = (int)random(1, D_cont.size() - 1);
         D_st.add(D_cont.get(D_pick - 1));
@@ -301,74 +512,88 @@ void patch() {
 
 void colour() {
   rec_col = new ArrayList<Integer>();
-  int add_no = 0;
+  if (activePalette == null || activePalette.length == 0) {
+    initDefaultPalette();
+  }
   for (int i = 0; i < x1.size(); i++) {
-    int add = (int)random(12);
-    if (add_no > x1.size() / 6) add = (int)random(10);
-    rec_col.add(add);
-    if (add > 9) add_no++;
+    rec_col.add((int)random(activePalette.length));
   }
 }
 
-void drawArtwork(int offsetX, int offsetY, int sizeMultiplier) {
+void drawArtwork() {
   // Draw colored patches
   for (int h = 0; h < xs1.size(); h++) {
     rectMode(CORNERS);
     noStroke();
-    int g = rec_col.get(h);
-    if (g < 4) fill(255, 247, 0);
-    else if (g < 7) fill(247, 0, 4);
-    else if (g < 10) fill(4, 4, 160);
-    else fill(26, 20, 20);
-    rect(offsetX + xs1.get(h) * sizeMultiplier, 
-         offsetY + ys1.get(h) * sizeMultiplier, 
-         offsetX + xs2.get(h) * sizeMultiplier, 
-         offsetY + ys2.get(h) * sizeMultiplier);
+    int paletteIndex = rec_col.get(h);
+    if (activePalette != null && activePalette.length > 0) {
+      fill(activePalette[paletteIndex % activePalette.length]);
+    } else {
+      fill(200);
+    }
+    rect(getX(xs1.get(h)), getY(ys1.get(h)), getX(xs2.get(h)), getY(ys2.get(h)));
   }
   
-  // Draw lines
+  // CRITICAL: Disable anti-aliasing for perfect line rendering
+  hint(DISABLE_OPTIMIZED_STROKE);
+  
+  // Draw lines with exact integer coordinates
   stroke(0);
-  strokeWeight(7);
+  strokeWeight(lineWeight);
   strokeCap(SQUARE);
+  strokeJoin(MITER);
   
+  // Force no smoothing on lines
+  noSmooth();
+  
+  // Full vertical lines
   for (int kk = 0; kk < A_add.size(); kk++) {
-    line(offsetX + A_add.get(kk) * sizeMultiplier, offsetY, 
-         offsetX + A_add.get(kk) * sizeMultiplier, offsetY + artHeight);
+    float x = getX(A_add.get(kk));
+    line(x, 0, x, artHeight);
   }
+  
+  // Full horizontal lines
   for (int kk = 0; kk < B_add.size(); kk++) {
-    line(offsetX, offsetY + B_add.get(kk) * sizeMultiplier, 
-         offsetX + artWidth, offsetY + B_add.get(kk) * sizeMultiplier);
+    float y = getY(B_add.get(kk));
+    line(0, y, artWidth, y);
   }
+  
+  // Segmented vertical lines
   for (int kk = 0; kk < C_add.size(); kk++) {
-    line(offsetX + C_add.get(kk) * sizeMultiplier, offsetY + C_st.get(kk) * sizeMultiplier,
-         offsetX + C_add.get(kk) * sizeMultiplier, offsetY + C_ed.get(kk) * sizeMultiplier);
+    float x = getX(C_add.get(kk));
+    float y1 = getY(C_st.get(kk));
+    float y2 = getY(C_ed.get(kk));
+    line(x, y1, x, y2);
   }
+  
+  // Segmented horizontal lines
   for (int kk = 0; kk < D_add.size(); kk++) {
-    line(offsetX + D_st.get(kk) * sizeMultiplier, offsetY + D_add.get(kk) * sizeMultiplier,
-         offsetX + D_ed.get(kk) * sizeMultiplier, offsetY + D_add.get(kk) * sizeMultiplier);
+    float x1 = getX(D_st.get(kk));
+    float x2 = getX(D_ed.get(kk));
+    float y = getY(D_add.get(kk));
+    line(x1, y, x2, y);
   }
+  
+  // Re-enable smooth for UI text
+  smooth();
+  hint(ENABLE_OPTIMIZED_STROKE);
 }
 
 void draw() {
   background(251, 252, 244);
+  drawArtwork();
   
-  // Draw the artwork
-  drawArtwork(0, 0, 25);
-  
-  // Update cursor blink
   if (millis() - cursorBlinkTime > 500) {
     cursorBlinkTime = millis();
     cursorVisible = !cursorVisible;
   }
   
-  // Draw UI panel
   int uiY = artHeight;
   rectMode(CORNERS);
   noStroke();
   fill(50);
   rect(0, uiY, width, height);
   
-  // Button dimensions (responsive)
   int buttonWidth = 70;
   int buttonHeight = 28;
   int buttonSpacing = 10;
@@ -376,7 +601,7 @@ void draw() {
   int row1Y = uiY + 12;
   int row2Y = uiY + 50;
   
-  // Row 1 buttons - dark gray
+  // Row 1 buttons
   fill(80);
   rect(startX, row1Y, startX + buttonWidth, row1Y + buttonHeight);
   rect(startX + buttonWidth + buttonSpacing, row1Y, startX + buttonWidth * 2 + buttonSpacing, row1Y + buttonHeight);
@@ -391,24 +616,31 @@ void draw() {
   text("SHUFFLE\nPATCH", startX + (buttonWidth + buttonSpacing) * 2 + buttonWidth/2, row1Y + buttonHeight/2);
   text("SHUFFLE\nCOLOUR", startX + (buttonWidth + buttonSpacing) * 3 + buttonWidth/2, row1Y + buttonHeight/2);
   
-  // Row 2 export buttons
+  // Row 2 buttons
+  int row2ButtonCount = 3;
+  int row2TotalWidth = buttonWidth * row2ButtonCount + buttonSpacing * (row2ButtonCount - 1);
+  int row2StartX = width - row2TotalWidth;
+  
   fill(80);
-  rect(startX, row2Y, startX + buttonWidth, row2Y + buttonHeight);
-  rect(startX + buttonWidth + buttonSpacing, row2Y, startX + buttonWidth * 2 + buttonSpacing, row2Y + buttonHeight);
+  rect(row2StartX, row2Y, row2StartX + buttonWidth, row2Y + buttonHeight);
+  rect(row2StartX + buttonWidth + buttonSpacing, row2Y, row2StartX + buttonWidth * 2 + buttonSpacing, row2Y + buttonHeight);
+  rect(row2StartX + (buttonWidth + buttonSpacing) * 2, row2Y, row2StartX + buttonWidth * 3 + buttonSpacing * 2, row2Y + buttonHeight);
   
   fill(255);
-  text("EXPORT PNG", startX + buttonWidth/2, row2Y + buttonHeight/2);
-  text("EXPORT SVG", startX + buttonWidth + buttonSpacing + buttonWidth/2, row2Y + buttonHeight/2);
+  text("API\nCOLORS", row2StartX + buttonWidth/2, row2Y + buttonHeight/2);
+  text("EXPORT PNG", row2StartX + buttonWidth + buttonSpacing + buttonWidth/2, row2Y + buttonHeight/2);
+  text("EXPORT SVG", row2StartX + (buttonWidth + buttonSpacing) * 2 + buttonWidth/2, row2Y + buttonHeight/2);
   
-  // Input area - Ruleset and Percentage side by side
+  // Input fields
   int inputX = 20;
   int inputY = uiY + 12;
-  int ruleWidth = 180;
-  int percentWidth = 60;
+  int ruleWidth = 140;
+  int percentWidth = 50;
+  int colorCountWidth = 50;
   int inputHeight = 28;
-  int spacing = 10;
+  int spacing = 8;
   
-  // Ruleset input box - highlight if focused
+  // Rule input
   if (focusRule) {
     stroke(100);
     strokeWeight(2);
@@ -417,23 +649,19 @@ void draw() {
   }
   fill(255);
   rect(inputX, inputY, inputX + ruleWidth, inputY + inputHeight);
-  
   fill(0);
   textAlign(LEFT, CENTER);
   textSize(11);
   text(ruleInput, inputX + 5, inputY + inputHeight/2);
-  
-  // Draw cursor in rule field if focused
   if (focusRule && cursorVisible) {
     float textW = textWidth(ruleInput);
     stroke(0);
     strokeWeight(1);
-    line(inputX + 5 + textW, inputY + 5, 
-         inputX + 5 + textW, inputY + inputHeight - 5);
+    line(inputX + 5 + textW, inputY + 5, inputX + 5 + textW, inputY + inputHeight - 5);
   }
   
-  // Percentage text box - highlight if focused (no % sign inside box)
-  noStroke();
+  // Percentage input
+  int percentX = inputX + ruleWidth + spacing;
   if (focusPercent) {
     stroke(100);
     strokeWeight(2);
@@ -441,20 +669,37 @@ void draw() {
     noStroke();
   }
   fill(255);
-  rect(inputX + ruleWidth + spacing, inputY, inputX + ruleWidth + spacing + percentWidth, inputY + inputHeight);
-  
+  rect(percentX, inputY, percentX + percentWidth, inputY + inputHeight);
   fill(0);
   textAlign(CENTER, CENTER);
-  text(percentText, inputX + ruleWidth + spacing + percentWidth/2, inputY + inputHeight/2);
-  
-  // Draw cursor in percent field if focused
+  text(percentText, percentX + percentWidth/2, inputY + inputHeight/2);
   if (focusPercent && cursorVisible) {
     float textW = textWidth(percentText);
     stroke(0);
     strokeWeight(1);
-    // Position cursor after the text
-    line(inputX + ruleWidth + spacing + percentWidth/2 + textW/2, inputY + 5,
-         inputX + ruleWidth + spacing + percentWidth/2 + textW/2, inputY + inputHeight - 5);
+    line(percentX + percentWidth/2 + textW/2, inputY + 5,
+         percentX + percentWidth/2 + textW/2, inputY + inputHeight - 5);
+  }
+  
+  // Color count input
+  int colorCountX = percentX + percentWidth + spacing;
+  if (focusColorCount) {
+    stroke(100);
+    strokeWeight(2);
+  } else {
+    noStroke();
+  }
+  fill(255);
+  rect(colorCountX, inputY, colorCountX + colorCountWidth, inputY + inputHeight);
+  fill(0);
+  textAlign(CENTER, CENTER);
+  text(colorCountText, colorCountX + colorCountWidth/2, inputY + inputHeight/2);
+  if (focusColorCount && cursorVisible) {
+    float textW = textWidth(colorCountText);
+    stroke(0);
+    strokeWeight(1);
+    line(colorCountX + colorCountWidth/2 + textW/2, inputY + 5,
+         colorCountX + colorCountWidth/2 + textW/2, inputY + inputHeight - 5);
   }
   
   // Labels
@@ -462,108 +707,143 @@ void draw() {
   fill(200);
   textSize(9);
   textAlign(LEFT, CENTER);
-  text("Rule String (type anything, ENTER strips non-A/B/C/D)", inputX, inputY + inputHeight + 12);
-  text("Fill %", inputX + ruleWidth + spacing, inputY + inputHeight + 12);
+  text("Rule String (ENTER to apply)", inputX, inputY + inputHeight + 12);
+  text("Fill %", percentX + percentWidth/2, inputY + inputHeight + 12);
+  text("Colors\n(0=all)", colorCountX + colorCountWidth/2, inputY + inputHeight + 12);
   
-  // Instructions
-  textAlign(CENTER, CENTER);
+  // Version and instructions
+  String paletteInfo = " | Palette: " + paletteSource;
+  if (paletteSource.equals("api") && lastAPIPaletteName.length() > 0) {
+    paletteInfo += " - " + lastAPIPaletteName;
+  }
+  if (fullPalette != null) {
+    paletteInfo += " (" + fullPalette.length + " colors";
+    if (activePalette != null) {
+      paletteInfo += ", using " + activePalette.length;
+    }
+    paletteInfo += ")";
+  }
+  
+  fill(200);
+  textAlign(LEFT, CENTER);
   textSize(9);
-  text("S - Save PNG/SVG (see booleans at top of code)", width/2, height - 12);
+  text(scriptName + " v" + scriptVersion + " | " + artWidth + "x" + artHeight + " | Grid: " + gridSizeX + "x" + gridSizeY + paletteInfo, 20, height - 25);
+  
+  textAlign(CENTER, CENTER);
+  text("S - Save PNG/SVG | Click API COLORS to fetch new palette", width/2, height - 12);
 }
 
 void mouseClicked() {
   int uiY = artHeight;
   int buttonWidth = 70;
   int buttonSpacing = 10;
-  int startX = width - (buttonWidth * 4 + buttonSpacing * 3);
+  
+  int row1StartX = width - (buttonWidth * 4 + buttonSpacing * 3);
   int row1Y = uiY + 12;
+  
+  int row2ButtonCount = 3;
+  int row2TotalWidth = buttonWidth * row2ButtonCount + buttonSpacing * (row2ButtonCount - 1);
+  int row2StartX = width - row2TotalWidth;
   int row2Y = uiY + 50;
   
-  // Check button clicks first
-  // RESET ALL
-  if (mouseX > startX && mouseX < startX + buttonWidth && mouseY > row1Y && mouseY < row1Y + 28) {
+  // Row 1 buttons
+  if (mouseX > row1StartX && mouseX < row1StartX + buttonWidth && mouseY > row1Y && mouseY < row1Y + 28) {
     rule = "AABBCCDDDDDD";
     ruleInput = rule;
     keep = 0.5;
     percentText = "50";
+    initDefaultPalette();
     focusRule = true;
     focusPercent = false;
-    setup();
+    focusColorCount = false;
+    crv();
+    patch();
+    colour();
     return;
   }
   
-  // SHUFFLE CURVE
-  if (mouseX > startX + buttonWidth + buttonSpacing && mouseX < startX + buttonWidth * 2 + buttonSpacing && 
+  if (mouseX > row1StartX + buttonWidth + buttonSpacing && mouseX < row1StartX + buttonWidth * 2 + buttonSpacing && 
       mouseY > row1Y && mouseY < row1Y + 28) {
     crv();
     patch();
     return;
   }
   
-  // SHUFFLE PATCH
-  if (mouseX > startX + (buttonWidth + buttonSpacing) * 2 && mouseX < startX + buttonWidth * 3 + buttonSpacing * 2 && 
+  if (mouseX > row1StartX + (buttonWidth + buttonSpacing) * 2 && mouseX < row1StartX + buttonWidth * 3 + buttonSpacing * 2 && 
       mouseY > row1Y && mouseY < row1Y + 28) {
     patch();
     return;
   }
   
-  // SHUFFLE COLOUR
-  if (mouseX > startX + (buttonWidth + buttonSpacing) * 3 && mouseX < startX + buttonWidth * 4 + buttonSpacing * 3 && 
+  if (mouseX > row1StartX + (buttonWidth + buttonSpacing) * 3 && mouseX < row1StartX + buttonWidth * 4 + buttonSpacing * 3 && 
       mouseY > row1Y && mouseY < row1Y + 28) {
     colour();
     return;
   }
   
-  // PNG EXPORT button - overrides exportPNG boolean
-  if (mouseX > startX && mouseX < startX + buttonWidth && mouseY > row2Y && mouseY < row2Y + 28) {
+  // Row 2 buttons
+  if (mouseX > row2StartX && mouseX < row2StartX + buttonWidth && mouseY > row2Y && mouseY < row2Y + 28) {
+    fetchColorsFromAPI();
+    return;
+  }
+  
+  if (mouseX > row2StartX + buttonWidth + buttonSpacing && mouseX < row2StartX + buttonWidth * 2 + buttonSpacing && 
+      mouseY > row2Y && mouseY < row2Y + 28) {
     exportToPNG();
     return;
   }
   
-  // SVG EXPORT button - overrides exportSVG boolean
-  if (mouseX > startX + buttonWidth + buttonSpacing && mouseX < startX + buttonWidth * 2 + buttonSpacing && 
+  if (mouseX > row2StartX + (buttonWidth + buttonSpacing) * 2 && mouseX < row2StartX + buttonWidth * 3 + buttonSpacing * 2 && 
       mouseY > row2Y && mouseY < row2Y + 28) {
     exportToSVG();
     return;
   }
   
-  // Check text box clicks
+  // Text field clicks
   int inputX = 20;
-  int ruleWidth = 180;
-  int percentWidth = 60;
-  int spacing = 10;
+  int ruleWidth = 140;
+  int percentWidth = 50;
+  int colorCountWidth = 50;
+  int spacing = 8;
   int inputY = uiY + 12;
   int inputHeight = 28;
   
-  // Click on rule input box
-  if (mouseX > inputX && mouseX < inputX + ruleWidth && 
-      mouseY > inputY && mouseY < inputY + inputHeight) {
+  if (mouseX > inputX && mouseX < inputX + ruleWidth && mouseY > inputY && mouseY < inputY + inputHeight) {
     focusRule = true;
     focusPercent = false;
+    focusColorCount = false;
     cursorBlinkTime = millis();
     cursorVisible = true;
     return;
   }
   
-  // Click on percentage text box
-  if (mouseX > inputX + ruleWidth + spacing && mouseX < inputX + ruleWidth + spacing + percentWidth && 
-      mouseY > inputY && mouseY < inputY + inputHeight) {
+  int percentX = inputX + ruleWidth + spacing;
+  if (mouseX > percentX && mouseX < percentX + percentWidth && mouseY > inputY && mouseY < inputY + inputHeight) {
     focusRule = false;
     focusPercent = true;
+    focusColorCount = false;
     cursorBlinkTime = millis();
     cursorVisible = true;
     return;
   }
   
-  // Click anywhere else - remove focus
+  int colorCountX = percentX + percentWidth + spacing;
+  if (mouseX > colorCountX && mouseX < colorCountX + colorCountWidth && mouseY > inputY && mouseY < inputY + inputHeight) {
+    focusRule = false;
+    focusPercent = false;
+    focusColorCount = true;
+    cursorBlinkTime = millis();
+    cursorVisible = true;
+    return;
+  }
+  
   focusRule = false;
   focusPercent = false;
+  focusColorCount = false;
 }
 
 void keyPressed() {
-  // Handle input based on which field has focus
   if (focusPercent) {
-    // Percentage input handling
     if (key >= '0' && key <= '9') {
       String newText = percentText;
       if (newText.equals("0") && key != '0') {
@@ -574,26 +854,41 @@ void keyPressed() {
       int percent = int(newText);
       if (percent >= 0 && percent <= 100) {
         percentText = newText;
+        // keep and patch NOT updated here
+      }
+    } else if ((key == BACKSPACE || key == DELETE) && percentText.length() > 0) {
+      percentText = percentText.substring(0, percentText.length() - 1);
+      if (percentText.length() == 0) percentText = "0";
+      // keep and patch NOT updated here
+    } else if (key == ENTER) {
+      int percent = int(percentText);
+      if (percent >= 0 && percent <= 100) {
         keep = percent / 100.0;
         patch();
       }
-    } else if (key == BACKSPACE && percentText.length() > 0) {
-      percentText = percentText.substring(0, percentText.length() - 1);
-      if (percentText.length() == 0) percentText = "0";
-      int percent = int(percentText);
-      keep = percent / 100.0;
-      patch();
-    } else if (key == DELETE && percentText.length() > 0) {
-      percentText = percentText.substring(0, percentText.length() - 1);
-      if (percentText.length() == 0) percentText = "0";
-      int percent = int(percentText);
-      keep = percent / 100.0;
-      patch();
+    }
+  } else if (focusColorCount) {
+    if (key >= '0' && key <= '9') {
+      String newText = colorCountText;
+      if (newText.equals("0") && key != '0') {
+        newText = "" + key;
+      } else if (newText.length() < 3) {
+        newText = newText + key;
+      }
+      colorCountText = newText;
+    } else if ((key == BACKSPACE || key == DELETE) && colorCountText.length() > 0) {
+      colorCountText = colorCountText.substring(0, colorCountText.length() - 1);
+      if (colorCountText.length() == 0) colorCountText = "0";
+    } else if (key == ENTER) {
+      int limit = int(colorCountText);
+      if (limit < 0) limit = 1;
+      if (fullPalette != null && limit > fullPalette.length) limit = fullPalette.length;
+      colorCountText = str(limit);
+      updateActivePalette();
+      colour();
     }
   } else if (focusRule) {
-    // Rule input handling - accept ANY key and add to ruleInput
     if (key == ENTER) {
-      // Validate and process rule input
       String cleaned = "";
       for (int i = 0; i < ruleInput.length(); i++) {
         char c = Character.toUpperCase(ruleInput.charAt(i));
@@ -603,28 +898,25 @@ void keyPressed() {
       }
       if (cleaned.length() > 0) {
         rule = cleaned;
-        ruleInput = cleaned;  // Update the display to show the cleaned rule
-        setup();
+        ruleInput = cleaned;
+        crv();
+        patch();
+        colour();
       }
-    } else if (key == BACKSPACE && ruleInput.length() > 0) {
-      ruleInput = ruleInput.substring(0, ruleInput.length() - 1);
-    } else if (key == DELETE && ruleInput.length() > 0) {
+    } else if ((key == BACKSPACE || key == DELETE) && ruleInput.length() > 0) {
       ruleInput = ruleInput.substring(0, ruleInput.length() - 1);
     } else if (key != CODED && key != ENTER && key != BACKSPACE && key != DELETE) {
-      // Add any typed character to ruleInput (will be filtered on ENTER)
       if (ruleInput.length() < 32) {
         ruleInput = ruleInput + key;
       }
     }
   }
   
-  // S key for export (respects booleans) - works regardless of focus
   if (key == 's' || key == 'S') {
     if (exportPNG) exportToPNG();
     if (exportSVG) exportToSVG();
   }
   
-  // Reset cursor blink on any keypress
   cursorBlinkTime = millis();
   cursorVisible = true;
 }
@@ -632,26 +924,149 @@ void keyPressed() {
 String getTimestamp() {
   Calendar cal = Calendar.getInstance();
   return String.format("%04d_%02d_%02d_%02d_%02d_%02d",
-    cal.get(Calendar.YEAR),
-    cal.get(Calendar.MONTH) + 1,
-    cal.get(Calendar.DAY_OF_MONTH),
-    cal.get(Calendar.HOUR_OF_DAY),
-    cal.get(Calendar.MINUTE),
-    cal.get(Calendar.SECOND)
-  );
+    cal.get(Calendar.YEAR), cal.get(Calendar.MONTH) + 1, cal.get(Calendar.DAY_OF_MONTH),
+    cal.get(Calendar.HOUR_OF_DAY), cal.get(Calendar.MINUTE), cal.get(Calendar.SECOND));
 }
 
 void exportToPNG() {
   String timestamp = getTimestamp();
+  String filename = timestamp + "_" + scriptName + "_v" + scriptVersion + ".png";
+  
+  // Force a redraw and capture
+  redraw();
+  delay(50);
+  
   PImage artwork = get(0, 0, artWidth, artHeight);
-  artwork.save(timestamp + "_Mondrian_Processing.png");
-  println("Saved: " + timestamp + "_Mondrian_Processing.png");
+  artwork.save(filename);
+  
+  // Save metadata
+  String metadataFile = filename + ".metadata.txt";
+  PrintWriter output = createWriter(metadataFile);
+  output.println("Created with " + scriptName + ".pde v" + scriptVersion);
+  output.println("Dimensions: " + artWidth + "x" + artHeight);
+  output.println("Grid: " + gridSizeX + "x" + gridSizeY);
+  output.println("Grammar: " + rule);
+  output.println("Fill percentage: " + percentText + "%");
+  if (paletteSource.equals("api") && lastAPIPaletteURL.length() > 0) {
+    output.println("Color palette source URL: " + lastAPIPaletteURL);
+    if (lastAPIPaletteName.length() > 0) {
+      output.println("Palette name: " + lastAPIPaletteName);
+    }
+  } else {
+    output.println("Color palette source: " + paletteSource);
+  }
+  if (fullPalette != null) {
+    output.println("Full palette size: " + fullPalette.length);
+  }
+  if (activePalette != null) {
+    output.println("Active colors: " + activePalette.length);
+    output.println("Colors in active palette:");
+    for (int i = 0; i < activePalette.length; i++) {
+      String hex = hex(activePalette[i], 6);
+      output.println("#" + hex);
+    }
+  }
+  output.flush();
+  output.close();
+  println("Saved PNG: " + filename);
 }
 
 void exportToSVG() {
   String timestamp = getTimestamp();
-  beginRecord(SVG, timestamp + "_Mondrian_Processing.svg");
-  drawArtwork(0, 0, 25);
-  endRecord();
-  println("Saved: " + timestamp + "_Mondrian_Processing.svg");
+  String filename = timestamp + "_" + scriptName + "_v" + scriptVersion + ".svg";
+  
+  PrintWriter output = createWriter(filename);
+  
+  // Write SVG header - NO SCALING
+  output.println("<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
+  output.println("<svg xmlns=\"http://www.w3.org/2000/svg\"");
+  output.println("     xmlns:xlink=\"http://www.w3.org/1999/xlink\"");
+  output.println("     xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\"");
+  output.println("     xmlns:cc=\"http://creativecommons.org/ns#\"");
+  output.println("     xmlns:dc=\"http://purl.org/dc/elements/1.1/\"");
+  output.println("     width=\"" + artWidth + "\"");
+  output.println("     height=\"" + artHeight + "\"");
+  output.println("     viewBox=\"0 0 " + artWidth + " " + artHeight + "\">");
+  
+  // Add metadata with proper opening tags
+  output.println("  <metadata>");
+  output.println("    <rdf:RDF>");
+  output.println("      <cc:Work rdf:about=\"\">");
+  output.println("        <dc:description>");
+  output.println("          Created with " + scriptName + ".pde v" + scriptVersion);
+  output.println("          Dimensions: " + artWidth + "x" + artHeight);
+  output.println("          Grid: " + gridSizeX + "x" + gridSizeY);
+  output.println("          Grammar: " + rule);
+  output.println("          Fill percentage: " + percentText + "%");
+  if (lastAPIPaletteURL.length() > 0) {
+    output.println("          Color palette source URL: " + lastAPIPaletteURL);
+    output.println("          Palette name: " + lastAPIPaletteName);
+  } else {
+    output.println("          Color palette source: " + paletteSource);
+  }
+  if (fullPalette != null) {
+    output.println("          Full palette size: " + fullPalette.length);
+  }
+  if (activePalette != null) {
+    output.println("          Active colors: " + activePalette.length);
+    output.println("          Color set:");
+    for (int i = 0; i < activePalette.length; i++) {
+      String hex = hex(activePalette[i], 6);
+      output.println("          #" + hex);
+    }
+  }
+  output.println("        </dc:description>");
+  output.println("      </cc:Work>");
+  output.println("    </rdf:RDF>");
+  output.println("  </metadata>");
+  
+  // Draw all colored rectangles
+  for (int h = 0; h < xs1.size(); h++) {
+    float x = getX(xs1.get(h));
+    float y = getY(ys1.get(h));
+    float w = getX(xs2.get(h)) - x;
+    float hgt = getY(ys2.get(h)) - y;
+    
+    int paletteIndex = rec_col.get(h);
+    color c = activePalette[paletteIndex % activePalette.length];
+    
+    String hexColor = "#" + hex(int(red(c)), 2) + hex(int(green(c)), 2) + hex(int(blue(c)), 2);
+    
+    output.println("  <rect x=\"" + x + "\" y=\"" + y + "\" width=\"" + w + "\" height=\"" + hgt + 
+                   "\" fill=\"" + hexColor + "\" stroke=\"none\"/>");
+  }
+  
+  // Draw all lines with SQUARE caps and MITER joins
+  output.println("  <g stroke=\"#000000\" stroke-width=\"" + lineWeight + "\" stroke-linecap=\"square\" stroke-linejoin=\"miter\" fill=\"none\">");
+  
+  for (int kk = 0; kk < A_add.size(); kk++) {
+    float x = getX(A_add.get(kk));
+    output.println("    <line x1=\"" + x + "\" y1=\"0\" x2=\"" + x + "\" y2=\"" + artHeight + "\"/>");
+  }
+  
+  for (int kk = 0; kk < B_add.size(); kk++) {
+    float y = getY(B_add.get(kk));
+    output.println("    <line x1=\"0\" y1=\"" + y + "\" x2=\"" + artWidth + "\" y2=\"" + y + "\"/>");
+  }
+  
+  for (int kk = 0; kk < C_add.size(); kk++) {
+    float x = getX(C_add.get(kk));
+    float y1 = getY(C_st.get(kk));
+    float y2 = getY(C_ed.get(kk));
+    output.println("    <line x1=\"" + x + "\" y1=\"" + y1 + "\" x2=\"" + x + "\" y2=\"" + y2 + "\"/>");
+  }
+  
+  for (int kk = 0; kk < D_add.size(); kk++) {
+    float x1 = getX(D_st.get(kk));
+    float x2 = getX(D_ed.get(kk));
+    float y = getY(D_add.get(kk));
+    output.println("    <line x1=\"" + x1 + "\" y1=\"" + y + "\" x2=\"" + x2 + "\" y2=\"" + y + "\"/>");
+  }
+  
+  output.println("  </g>");
+  output.println("</svg>");
+  output.flush();
+  output.close();
+  
+  println("Saved SVG: " + filename);
 }
