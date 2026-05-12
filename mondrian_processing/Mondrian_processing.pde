@@ -12,6 +12,9 @@
 // - add PNG and SVG export with full metadata (grammar, grid, palette name / URL)
 // - add line collision avoidance to prevent overlapping/clustered lines
 // - redesign UI with buttons for new features and better contrast
+// - custom Mondrian palette with colors I reckon he used in his neoplastic paintings
+// - dynamic line weight scaling based on canvas width (proportional to 1022px reference)
+// - random line weight per sketch run (integer between scaled min/max)
 //
 // DEPENDENCIES
 // Processing
@@ -30,16 +33,16 @@
 // TO DO
 // - museum mode; only display artwork area, fullscreen, no UI controls, getting a new palette in the background
 //   for every new render, then doing the render when ready.
-// - in museum mode, every 7th iteration use default palette as Mondrian throwback?
+// - in museum mode, every 7th iteration use Mondrian palette as throwback?
 // - rapid creation mode (many renders and PNG + SVG saves up to N renders)
 // - CLI mode accepting a JSON config and dynamically patching settings
 //   - to start any mode thereby also?
 //   - to override globals like dimensions
 //   - to override palette, specifying the config as "source" in written metadata
 
-String scriptVersion = "2.0.0";
+String scriptVersion = "2.2.40";
 String scriptName = "Mondrian_Processing";
-String paletteSource = "default";
+String paletteSource = "custom_mondrian";
 String lastAPIPaletteName = "";
 String lastAPIPaletteURL = "";
 
@@ -52,18 +55,26 @@ boolean exportPNG = true;
 boolean exportSVG = true;
 
 // Layout settings - DYNAMIC GRID
-int artWidth = 720;      // Width of the Mondrian artwork
-int artHeight = 842;     // Height of the Mondrian artwork
+int artWidth = 1022;      // Width of the neo-or-postplastic artwork
+int artHeight = 1092;     // Height of the neo-or-postplastic artwork
 int gridSizeReference = 32;  // Reference grid size for the shorter dimension
 int uiPanelHeight = 135; // Height of the UI panel at bottom
+
+// Line weight configuration - PROPORTIONAL SCALING
+// Reference dimensions: max canvas width = 1022px
+// At 1022px width: min line weight = 6px, max line weight = 32px
+final float REFERENCE_WIDTH = 1022.0;
+final float REFERENCE_MIN_WEIGHT = 6.0;
+final float REFERENCE_MAX_WEIGHT = 32.0;
+
+float currentLineWeight;  // Will be set randomly on each run
+float minLineDistance;    // Minimum distance between lines (currentLineWeight * 2)
 
 // Calculated dimensions
 int canvasWidth;
 int canvasHeight;
 int gridSizeX;           // Number of horizontal divisions
 int gridSizeY;           // Number of vertical divisions
-float lineWeight = 7;    // Line thickness in pixels
-float minLineDistance;   // Minimum distance between lines (lineWeight * 2)
 
 String rule = "AABBCCDDDDDD";
 String ruleInput = rule;
@@ -78,16 +89,27 @@ boolean focusColorCount = false;
 int cursorBlinkTime;
 boolean cursorVisible;
 
+// CUSTOM MONDRIAN PALETTE (inspired by color analysis of original works)
+// NOTE: #f6f6f6 (white) is EXCLUDED from this palette - it's reserved for canvas background only!
+color[] customMondrianPalette = {
+  #f22a27,  // Vibrant Mondrian red, and
+  #f89027,  // Warm Mondrian orange,
+  #ffcf30,  // Golden yellow,
+  #0f0c9b,  // Deep ultramarine blue,
+  #5168a3,  // Muted slate blue,
+  #b1b1b1,   // Cool gray, and
+  #050506   // Mondrian black
+};
+
+// Canvas white color (never used for patches)
+final color CANVAS_WHITE = #f6f6f6;
+
+// Line color (almost-black, warm)
+final color LINE_COLOR = #050506;
+
 // Color palette system
 color[] fullPalette;
 color[] activePalette;
-
-color[] defaultPalette = {
-  #FFF700,  // yellow
-  #F70004,  // red
-  #0404A0,  // blue
-  #1A1414   // dark gray
-};
 
 String apiURL = "https://earthbound.io/data/random_ebPalette/";
 
@@ -127,16 +149,18 @@ void settings() {
 
 void setup() {
   surface.setTitle(scriptName + " v" + scriptVersion);
-
-  background(251, 252, 244);
+  
+  // Calculate line weight based on current canvas width
+  calculateLineWeight();
+  
+  background(CANVAS_WHITE);
   
   // Calculate dynamic grid based on canvas proportions
   calculateGrid();
-  minLineDistance = lineWeight * 2; // Minimum pixels between line centers
+  minLineDistance = currentLineWeight * 2; // Minimum pixels between line centers
   
-  if (fullPalette == null) {
-    initDefaultPalette();
-  }
+  // Initialize with custom Mondrian palette
+  initCustomMondrianPalette();
   
   cursorBlinkTime = millis();
   cursorVisible = true;
@@ -154,6 +178,38 @@ void setup() {
   // all geometry, which was causing inconsistent
   // line (black box) width appearance:
   ((PGraphicsOpenGL)g).textureSampling(2);
+  
+  println("Line weight: " + currentLineWeight + "px (scaled from " + artWidth + "px width)");
+  println("Min line distance: " + minLineDistance + "px");
+  println("Using custom Mondrian palette with " + fullPalette.length + " colors (white reserved for canvas)");
+}
+
+void calculateLineWeight() {
+  // Calculate proportional scaling factor based on actual artWidth
+  float scaleFactor = artWidth / REFERENCE_WIDTH;
+  
+  // Calculate min and max for this canvas size
+  float scaledMin = REFERENCE_MIN_WEIGHT * scaleFactor;
+  float scaledMax = REFERENCE_MAX_WEIGHT * scaleFactor;
+  
+  // Apply lower bound clamping to prevent lines from being too thin
+  // Minimum practical line weight is 3px (anything smaller loses visual impact)
+  final float ABSOLUTE_MIN_WEIGHT = 3.0;
+  if (scaledMin < ABSOLUTE_MIN_WEIGHT) {
+    scaledMin = ABSOLUTE_MIN_WEIGHT;
+    // Adjust max proportionally if min was clamped
+    if (scaledMax < scaledMin + 2) {
+      scaledMax = scaledMin + 2;
+    }
+  }
+  
+  // Randomly select line weight between scaled min and max
+  currentLineWeight = random(scaledMin, scaledMax);
+  
+  // Round to nearest integer
+  currentLineWeight = round(currentLineWeight);
+  
+  if (currentLineWeight < 1) currentLineWeight = 1;
 }
 
 void calculateGrid() {
@@ -210,17 +266,18 @@ boolean isHorizontalLineTooClose(int gridY, ArrayList<Integer> existingLines) {
   return false;
 }
 
-void initDefaultPalette() {
-  fullPalette = new color[defaultPalette.length];
-  for (int i = 0; i < defaultPalette.length; i++) {
-    fullPalette[i] = defaultPalette[i];
+void initCustomMondrianPalette() {
+  fullPalette = new color[customMondrianPalette.length];
+  for (int i = 0; i < customMondrianPalette.length; i++) {
+    fullPalette[i] = customMondrianPalette[i];
   }
-  paletteSource = "default";
+  paletteSource = "custom_mondrian";
   lastAPIPaletteName = "";
   lastAPIPaletteURL = "";
   colorCountText = str(fullPalette.length);
   updateActivePalette();
-  println("Using default palette with " + fullPalette.length + " colors");
+  println("Using custom Mondrian palette with " + fullPalette.length + " colors");
+  println("Canvas white: #f6f6f6 | Line color: #050506");
 }
 
 void updateActivePalette() {
@@ -287,6 +344,10 @@ void fetchColorsFromAPI() {
 }
 
 void crv() {
+  // Re-randomize line weight for this new composition
+  calculateLineWeight();
+  minLineDistance = currentLineWeight * 2;
+
   A_gr = new ArrayList<Integer>();
   B_gr = new ArrayList<Integer>();
   A_add = new ArrayList<Integer>();
@@ -522,20 +583,20 @@ void patch() {
 void colour() {
   rec_col = new ArrayList<Integer>();
   if (activePalette == null || activePalette.length == 0) {
-    initDefaultPalette();
+    initCustomMondrianPalette();
   }
   for (int i = 0; i < x1.size(); i++) {
     rec_col.add((int)random(activePalette.length));
   }
 }
 
-// Draw a black box (rectangle) representing a line segment - REPLACES line() calls
+// Draw a (rectangle) representing a line segment
 void drawLineBox(float x1, float y1, float x2, float y2, float thickness) {
   float halfThick = thickness / 2.0f;
   
   rectMode(CORNERS);
   noStroke();
-  fill(0);
+  fill(LINE_COLOR);
   
   if (abs(x1 - x2) < 0.1) {
     // Vertical box - force integer coordinates
@@ -553,7 +614,7 @@ void drawLineBox(float x1, float y1, float x2, float y2, float thickness) {
 }
 
 void drawArtwork() {
-  // Draw colored patches
+  // Draw colored patches using active palette (white NEVER appears here)
   for (int h = 0; h < xs1.size(); h++) {
     rectMode(CORNERS);
     noStroke();
@@ -561,7 +622,7 @@ void drawArtwork() {
     if (activePalette != null && activePalette.length > 0) {
       fill(activePalette[paletteIndex % activePalette.length]);
     } else {
-      fill(200);
+      fill(200);  // Fallback gray (should never happen)
     }
     
     float rx1 = round(getX(xs1.get(h)));
@@ -572,9 +633,9 @@ void drawArtwork() {
   }
   
   // Draw grid lines as boxes
-  fill(0);
+  fill(LINE_COLOR);
   noStroke();
-  float halfThick = lineWeight / 2.0f;
+  float halfThick = currentLineWeight / 2.0f;
   
   for (int kk = 0; kk < A_add.size(); kk++) {
     float x = round(getX(A_add.get(kk)));
@@ -602,7 +663,7 @@ void drawArtwork() {
 }
 
 void draw() {
-  background(251, 252, 244);
+  background(CANVAS_WHITE);
   drawArtwork();
   
   if (millis() - cursorBlinkTime > 500) {
@@ -746,13 +807,16 @@ void draw() {
     paletteInfo += ")";
   }
   
+  // Add line weight info to status display
+  String lineWeightInfo = " | Line weight: " + nf(currentLineWeight, 0, 0) + "px";
+  
   fill(200);
   textAlign(LEFT, CENTER);
   textSize(9);
-  text(scriptName + " v" + scriptVersion + " | " + artWidth + "x" + artHeight + " | Grid: " + gridSizeX + "x" + gridSizeY + paletteInfo, 20, height - 25);
+  text(scriptName + " v" + scriptVersion + " | " + artWidth + "x" + artHeight + " | Grid: " + gridSizeX + "x" + gridSizeY + paletteInfo + lineWeightInfo, 20, height - 25);
   
   textAlign(CENTER, CENTER);
-  text("S - Save PNG/SVG | Click API COLORS to fetch new palette", width/2, height - 12);
+  text("S - Save PNG/SVG | Click API COLORS to fetch new palette | Line weight varies per run (proportional to canvas width)", width/2, height - 12);
 }
 
 void mouseClicked() {
@@ -774,7 +838,7 @@ void mouseClicked() {
     ruleInput = rule;
     keep = 0.5;
     percentText = "50";
-    initDefaultPalette();
+    initCustomMondrianPalette();
     focusRule = true;
     focusPercent = false;
     focusColorCount = false;
@@ -969,6 +1033,9 @@ void exportToPNG() {
   output.println("Grid: " + gridSizeX + "x" + gridSizeY);
   output.println("Grammar: " + rule);
   output.println("Fill percentage: " + percentText + "%");
+  output.println("Line weight: " + currentLineWeight + "px (proportional to " + artWidth + "px width)");
+  output.println("Line color: #050506");
+  output.println("Canvas white: #f6f6f6");
   if (paletteSource.equals("api") && lastAPIPaletteURL.length() > 0) {
     output.println("Color palette source URL: " + lastAPIPaletteURL);
     if (lastAPIPaletteName.length() > 0) {
@@ -979,14 +1046,14 @@ void exportToPNG() {
   }
   if (fullPalette != null) {
     output.println("Full palette size: " + fullPalette.length);
+    output.println("Colors in full palette (excluding white):");
+    for (int i = 0; i < fullPalette.length; i++) {
+      String hex = hex(fullPalette[i], 6);
+      output.println("#" + hex);
+    }
   }
   if (activePalette != null) {
     output.println("Active colors: " + activePalette.length);
-    output.println("Colors in active palette:");
-    for (int i = 0; i < activePalette.length; i++) {
-      String hex = hex(activePalette[i], 6);
-      output.println("#" + hex);
-    }
   }
   output.flush();
   output.close();
@@ -1020,6 +1087,9 @@ void exportToSVG() {
   output.println("          Grid: " + gridSizeX + "x" + gridSizeY);
   output.println("          Grammar: " + rule);
   output.println("          Fill percentage: " + percentText + "%");
+  output.println("          Line weight: " + currentLineWeight + "px");
+  output.println("          Line color: #050506");
+  output.println("          Canvas white: #f6f6f6");
   if (lastAPIPaletteURL.length() > 0) {
     output.println("          Color palette source URL: " + lastAPIPaletteURL);
     output.println("          Palette name: " + lastAPIPaletteName);
@@ -1028,19 +1098,22 @@ void exportToSVG() {
   }
   if (fullPalette != null) {
     output.println("          Full palette size: " + fullPalette.length);
+    output.println("          Colors in full palette (excluding white):");
+    for (int i = 0; i < fullPalette.length; i++) {
+      String hex = hex(fullPalette[i], 6);
+      output.println("          #" + hex);
+    }
   }
   if (activePalette != null) {
     output.println("          Active colors: " + activePalette.length);
-    output.println("          Color set:");
-    for (int i = 0; i < activePalette.length; i++) {
-      String hex = hex(activePalette[i], 6);
-      output.println("          #" + hex);
-    }
   }
   output.println("        </dc:description>");
   output.println("      </cc:Work>");
   output.println("    </rdf:RDF>");
   output.println("  </metadata>");
+  
+  // Draw canvas white background
+  output.println("  <rect x=\"0\" y=\"0\" width=\"" + artWidth + "\" height=\"" + artHeight + "\" fill=\"#f6f6f6\"/>");
   
   // Draw all colored rectangles
   for (int h = 0; h < xs1.size(); h++) {
@@ -1058,21 +1131,21 @@ void exportToSVG() {
                    "\" fill=\"" + hexColor + "\" stroke=\"none\"/>");
   }
   
-  // Draw all grid lines as black RECTANGLES (not strokes) for perfect alignment in SVG
-  output.println("  <g fill=\"#000000\" stroke=\"none\">");
+  // Draw all grid lines RECTANGLES
+  output.println("  <g fill=\"#050506\" stroke=\"none\">");
   
-  float halfThick = lineWeight / 2.0f;
+  float halfThick = currentLineWeight / 2.0f;
   
   // Full vertical lines (boxes)
   for (int kk = 0; kk < A_add.size(); kk++) {
     float x = getX(A_add.get(kk));
-    output.println("    <rect x=\"" + (x - halfThick) + "\" y=\"0\" width=\"" + lineWeight + "\" height=\"" + artHeight + "\"/>");
+    output.println("    <rect x=\"" + (x - halfThick) + "\" y=\"0\" width=\"" + currentLineWeight + "\" height=\"" + artHeight + "\"/>");
   }
   
   // Full horizontal lines (boxes)
   for (int kk = 0; kk < B_add.size(); kk++) {
     float y = getY(B_add.get(kk));
-    output.println("    <rect x=\"0\" y=\"" + (y - halfThick) + "\" width=\"" + artWidth + "\" height=\"" + lineWeight + "\"/>");
+    output.println("    <rect x=\"0\" y=\"" + (y - halfThick) + "\" width=\"" + artWidth + "\" height=\"" + currentLineWeight + "\"/>");
   }
   
   // Segmented vertical lines (boxes)
@@ -1080,7 +1153,7 @@ void exportToSVG() {
     float x = getX(C_add.get(kk));
     float y1 = getY(C_st.get(kk));
     float y2 = getY(C_ed.get(kk));
-    output.println("    <rect x=\"" + (x - halfThick) + "\" y=\"" + y1 + "\" width=\"" + lineWeight + "\" height=\"" + (y2 - y1) + "\"/>");
+    output.println("    <rect x=\"" + (x - halfThick) + "\" y=\"" + y1 + "\" width=\"" + currentLineWeight + "\" height=\"" + (y2 - y1) + "\"/>");
   }
   
   // Segmented horizontal lines (boxes)
@@ -1088,7 +1161,7 @@ void exportToSVG() {
     float x1 = getX(D_st.get(kk));
     float x2 = getX(D_ed.get(kk));
     float y = getY(D_add.get(kk));
-    output.println("    <rect x=\"" + x1 + "\" y=\"" + (y - halfThick) + "\" width=\"" + (x2 - x1) + "\" height=\"" + lineWeight + "\"/>");
+    output.println("    <rect x=\"" + x1 + "\" y=\"" + (y - halfThick) + "\" width=\"" + (x2 - x1) + "\" height=\"" + currentLineWeight + "\"/>");
   }
   
   output.println("  </g>");
