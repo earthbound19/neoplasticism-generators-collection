@@ -15,6 +15,7 @@
 // - custom Mondrian palette with colors I reckon he used in his neoplastic paintings
 // - dynamic line weight scaling based on canvas width (proportional to 1022px reference)
 // - random line weight per sketch run (integer between scaled min/max)
+// - make many mode: infinite generation of variants with auto-save
 //
 // DEPENDENCIES
 // Processing
@@ -24,6 +25,9 @@
 // Run the sketch. Click on the rule text box to edit rules (type A/B/C/D). Click on percent box to edit percentage.
 // Press ENTER to generate a new composition based on the rule string.
 // Press S to save PNG and/or SVG (see booleans at top). Click PNG/SVG buttons to export (buttons override booleans).
+// Click "MAKE MANY" to enter generation mode (button toggles to STOP). In MAKE MANY mode, the sketch generates
+// and saves endless variations (new random curves + line weights) with the current grammar and color settings.
+// Click STOP (which the MAKE MANY button changes to when that mode is active) to halt generation.
 //
 // Creative Commons Share-Alike Attribution, by Richard Alexander Hall 2026-05-08, ported as noted from another
 // developer under DESCRIPTION.
@@ -40,7 +44,7 @@
 //   - to override globals like dimensions
 //   - to override palette, specifying the config as "source" in written metadata
 
-String scriptVersion = "2.2.40";
+String scriptVersion = "2.3.34";
 String scriptName = "Mondrian_Processing";
 String paletteSource = "custom_mondrian";
 String lastAPIPaletteName = "";
@@ -88,6 +92,11 @@ boolean focusPercent = false;
 boolean focusColorCount = false;
 int cursorBlinkTime;
 boolean cursorVisible;
+
+// MAKE MANY mode
+boolean makeManyMode = false;
+boolean stopRequested = false;
+Thread generationThread = null;
 
 // CUSTOM MONDRIAN PALETTE (inspired by color analysis of original works)
 // NOTE: #f6f6f6 (white) is EXCLUDED from this palette - it's reserved for canvas background only!
@@ -277,7 +286,6 @@ void initCustomMondrianPalette() {
   colorCountText = str(fullPalette.length);
   updateActivePalette();
   println("Using custom Mondrian palette with " + fullPalette.length + " colors");
-  println("Canvas white: #f6f6f6 | Line color: #050506");
 }
 
 void updateActivePalette() {
@@ -590,7 +598,7 @@ void colour() {
   }
 }
 
-// Draw a (rectangle) representing a line segment
+// Draw a rectangle representing a line segment
 void drawLineBox(float x1, float y1, float x2, float y2, float thickness) {
   float halfThick = thickness / 2.0f;
   
@@ -662,6 +670,57 @@ void drawArtwork() {
   }
 }
 
+void startMakeManyMode() {
+  if (generationThread != null && generationThread.isAlive()) {
+    return;
+  }
+  
+  stopRequested = false;
+  makeManyMode = true;
+  
+  generationThread = new Thread(new Runnable() {
+    public void run() {
+      while (!stopRequested) {
+        // Generate new composition
+        crv();
+        patch();
+        colour();
+        
+        // Wait for rendering
+        try {
+          Thread.sleep(100);
+        } catch (InterruptedException e) {
+          break;
+        }
+        
+        // Save files
+        exportToPNG();
+        exportToSVG();
+        
+        println("--- MAKE MANY: Generated and saved variant ---");
+        
+        // Brief pause between generations
+        try {
+          Thread.sleep(500);
+        } catch (InterruptedException e) {
+          break;
+        }
+      }
+      
+      makeManyMode = false;
+      generationThread = null;
+      surface.setTitle(scriptName + " v" + scriptVersion);
+      println("MAKE MANY mode stopped.");
+    }
+  });
+  
+  generationThread.start();
+}
+
+void stopMakeManyMode() {
+  stopRequested = true;
+}
+
 void draw() {
   background(CANVAS_WHITE);
   drawArtwork();
@@ -700,7 +759,7 @@ void draw() {
   text("SHUFFLE\nCOLOUR", startX + (buttonWidth + buttonSpacing) * 3 + buttonWidth/2, row1Y + buttonHeight/2);
   
   // Row 2 buttons
-  int row2ButtonCount = 3;
+  int row2ButtonCount = 4;
   int row2TotalWidth = buttonWidth * row2ButtonCount + buttonSpacing * (row2ButtonCount - 1);
   int row2StartX = width - row2TotalWidth;
   
@@ -708,11 +767,17 @@ void draw() {
   rect(row2StartX, row2Y, row2StartX + buttonWidth, row2Y + buttonHeight);
   rect(row2StartX + buttonWidth + buttonSpacing, row2Y, row2StartX + buttonWidth * 2 + buttonSpacing, row2Y + buttonHeight);
   rect(row2StartX + (buttonWidth + buttonSpacing) * 2, row2Y, row2StartX + buttonWidth * 3 + buttonSpacing * 2, row2Y + buttonHeight);
+  rect(row2StartX + (buttonWidth + buttonSpacing) * 3, row2Y, row2StartX + buttonWidth * 4 + buttonSpacing * 3, row2Y + buttonHeight);
   
   fill(255);
-  text("API\nCOLORS", row2StartX + buttonWidth/2, row2Y + buttonHeight/2);
-  text("EXPORT PNG", row2StartX + buttonWidth + buttonSpacing + buttonWidth/2, row2Y + buttonHeight/2);
-  text("EXPORT SVG", row2StartX + (buttonWidth + buttonSpacing) * 2 + buttonWidth/2, row2Y + buttonHeight/2);
+  if (makeManyMode) {
+    text("STOP", row2StartX + buttonWidth/2, row2Y + buttonHeight/2);
+  } else {
+    text("MAKE\nMANY", row2StartX + buttonWidth/2, row2Y + buttonHeight/2);
+  }
+  text("API\nCOLORS", row2StartX + buttonWidth + buttonSpacing + buttonWidth/2, row2Y + buttonHeight/2);
+  text("EXPORT\nPNG", row2StartX + (buttonWidth + buttonSpacing) * 2 + buttonWidth/2, row2Y + buttonHeight/2);
+  text("EXPORT\nSVG", row2StartX + (buttonWidth + buttonSpacing) * 3 + buttonWidth/2, row2Y + buttonHeight/2);
   
   // Input fields
   int inputX = 20;
@@ -816,7 +881,11 @@ void draw() {
   text(scriptName + " v" + scriptVersion + " | " + artWidth + "x" + artHeight + " | Grid: " + gridSizeX + "x" + gridSizeY + paletteInfo + lineWeightInfo, 20, height - 25);
   
   textAlign(CENTER, CENTER);
-  text("S - Save PNG/SVG | Click API COLORS to fetch new palette | Line weight varies per run (proportional to canvas width)", width/2, height - 12);
+  String modeInfo = "";
+  if (makeManyMode) {
+    modeInfo = " | MAKE MANY ACTIVE - Click STOP to halt generation";
+  }
+  text("S - Save PNG/SVG | Click API COLORS to fetch new palette | Line weight varies per run (proportional to canvas width)" + modeInfo, width/2, height - 12);
 }
 
 void mouseClicked() {
@@ -827,13 +896,14 @@ void mouseClicked() {
   int row1StartX = width - (buttonWidth * 4 + buttonSpacing * 3);
   int row1Y = uiY + 12;
   
-  int row2ButtonCount = 3;
+  int row2ButtonCount = 4;
   int row2TotalWidth = buttonWidth * row2ButtonCount + buttonSpacing * (row2ButtonCount - 1);
   int row2StartX = width - row2TotalWidth;
   int row2Y = uiY + 50;
   
   // Row 1 buttons
   if (mouseX > row1StartX && mouseX < row1StartX + buttonWidth && mouseY > row1Y && mouseY < row1Y + 28) {
+    if (makeManyMode) stopMakeManyMode();
     rule = "AABBCCDDDDDD";
     ruleInput = rule;
     keep = 0.5;
@@ -850,6 +920,7 @@ void mouseClicked() {
   
   if (mouseX > row1StartX + buttonWidth + buttonSpacing && mouseX < row1StartX + buttonWidth * 2 + buttonSpacing && 
       mouseY > row1Y && mouseY < row1Y + 28) {
+    if (makeManyMode) stopMakeManyMode();
     crv();
     patch();
     return;
@@ -869,17 +940,27 @@ void mouseClicked() {
   
   // Row 2 buttons
   if (mouseX > row2StartX && mouseX < row2StartX + buttonWidth && mouseY > row2Y && mouseY < row2Y + 28) {
-    fetchColorsFromAPI();
+    if (makeManyMode) {
+      stopMakeManyMode();
+    } else {
+      startMakeManyMode();
+    }
     return;
   }
   
   if (mouseX > row2StartX + buttonWidth + buttonSpacing && mouseX < row2StartX + buttonWidth * 2 + buttonSpacing && 
       mouseY > row2Y && mouseY < row2Y + 28) {
-    exportToPNG();
+    fetchColorsFromAPI();
     return;
   }
   
   if (mouseX > row2StartX + (buttonWidth + buttonSpacing) * 2 && mouseX < row2StartX + buttonWidth * 3 + buttonSpacing * 2 && 
+      mouseY > row2Y && mouseY < row2Y + 28) {
+    exportToPNG();
+    return;
+  }
+  
+  if (mouseX > row2StartX + (buttonWidth + buttonSpacing) * 3 && mouseX < row2StartX + buttonWidth * 4 + buttonSpacing * 3 && 
       mouseY > row2Y && mouseY < row2Y + 28) {
     exportToSVG();
     return;
@@ -1025,7 +1106,7 @@ void exportToPNG() {
   PImage artwork = get(0, 0, artWidth, artHeight);
   artwork.save(filename);
   
-  // Save metadata
+  // Save metadata - using variables instead of hardcoded colors
   String metadataFile = filename + ".metadata.txt";
   PrintWriter output = createWriter(metadataFile);
   output.println("Created with " + scriptName + ".pde v" + scriptVersion);
@@ -1034,8 +1115,8 @@ void exportToPNG() {
   output.println("Grammar: " + rule);
   output.println("Fill percentage: " + percentText + "%");
   output.println("Line weight: " + currentLineWeight + "px (proportional to " + artWidth + "px width)");
-  output.println("Line color: #050506");
-  output.println("Canvas white: #f6f6f6");
+  output.println("Line color: #" + hex(LINE_COLOR, 6));
+  output.println("Canvas white: #" + hex(CANVAS_WHITE, 6));
   if (paletteSource.equals("api") && lastAPIPaletteURL.length() > 0) {
     output.println("Color palette source URL: " + lastAPIPaletteURL);
     if (lastAPIPaletteName.length() > 0) {
@@ -1048,8 +1129,7 @@ void exportToPNG() {
     output.println("Full palette size: " + fullPalette.length);
     output.println("Colors in full palette (excluding white):");
     for (int i = 0; i < fullPalette.length; i++) {
-      String hex = hex(fullPalette[i], 6);
-      output.println("#" + hex);
+      output.println("#" + hex(fullPalette[i], 6));
     }
   }
   if (activePalette != null) {
@@ -1077,7 +1157,7 @@ void exportToSVG() {
   output.println("     height=\"" + artHeight + "\"");
   output.println("     viewBox=\"0 0 " + artWidth + " " + artHeight + "\">");
   
-  // Add metadata with proper opening tags
+  // Add metadata using variables
   output.println("  <metadata>");
   output.println("    <rdf:RDF>");
   output.println("      <cc:Work rdf:about=\"\">");
@@ -1088,8 +1168,8 @@ void exportToSVG() {
   output.println("          Grammar: " + rule);
   output.println("          Fill percentage: " + percentText + "%");
   output.println("          Line weight: " + currentLineWeight + "px");
-  output.println("          Line color: #050506");
-  output.println("          Canvas white: #f6f6f6");
+  output.println("          Line color: #" + hex(LINE_COLOR, 6));
+  output.println("          Canvas white: #" + hex(CANVAS_WHITE, 6));
   if (lastAPIPaletteURL.length() > 0) {
     output.println("          Color palette source URL: " + lastAPIPaletteURL);
     output.println("          Palette name: " + lastAPIPaletteName);
@@ -1100,8 +1180,7 @@ void exportToSVG() {
     output.println("          Full palette size: " + fullPalette.length);
     output.println("          Colors in full palette (excluding white):");
     for (int i = 0; i < fullPalette.length; i++) {
-      String hex = hex(fullPalette[i], 6);
-      output.println("          #" + hex);
+      output.println("          #" + hex(fullPalette[i], 6));
     }
   }
   if (activePalette != null) {
@@ -1112,8 +1191,8 @@ void exportToSVG() {
   output.println("    </rdf:RDF>");
   output.println("  </metadata>");
   
-  // Draw canvas white background
-  output.println("  <rect x=\"0\" y=\"0\" width=\"" + artWidth + "\" height=\"" + artHeight + "\" fill=\"#f6f6f6\"/>");
+  // Draw canvas background using variable
+  output.println("  <rect x=\"0\" y=\"0\" width=\"" + artWidth + "\" height=\"" + artHeight + "\" fill=\"#" + hex(CANVAS_WHITE, 6) + "\"/>");
   
   // Draw all colored rectangles
   for (int h = 0; h < xs1.size(); h++) {
@@ -1125,14 +1204,12 @@ void exportToSVG() {
     int paletteIndex = rec_col.get(h);
     color c = activePalette[paletteIndex % activePalette.length];
     
-    String hexColor = "#" + hex(int(red(c)), 2) + hex(int(green(c)), 2) + hex(int(blue(c)), 2);
-    
     output.println("  <rect x=\"" + x + "\" y=\"" + y + "\" width=\"" + w + "\" height=\"" + hgt + 
-                   "\" fill=\"" + hexColor + "\" stroke=\"none\"/>");
+                   "\" fill=\"#" + hex(c, 6) + "\" stroke=\"none\"/>");
   }
   
-  // Draw all grid lines RECTANGLES
-  output.println("  <g fill=\"#050506\" stroke=\"none\">");
+  // Draw all grid lines as RECTANGLES using color from variable
+  output.println("  <g fill=\"#" + hex(LINE_COLOR, 6) + "\" stroke=\"none\">");
   
   float halfThick = currentLineWeight / 2.0f;
   
