@@ -15,7 +15,7 @@
 // - custom Mondrian palette with colors I reckon he used in his neoplastic paintings
 // - dynamic line weight scaling based on canvas width (proportional to 1022px reference)
 // - random line weight per sketch run (integer between scaled min/max)
-// - make many mode: infinite generation of variants with auto-save
+// - make many mode: infinite generation of variants with auto-save (frame-based state machine, no background threading)
 //
 // DEPENDENCIES
 // Processing
@@ -29,8 +29,9 @@
 // and saves endless variations (new random curves + line weights) with the current grammar and color settings.
 // Click STOP (which the MAKE MANY button changes to when that mode is active) to halt generation.
 //
-// Creative Commons Share-Alike Attribution, by Richard Alexander Hall 2026-05-08, ported as noted from another
-// developer under DESCRIPTION.
+// LICENSE
+// Creative Commons Share-Alike Attribution, by Richard Alexander Hall - 2026-05-12, ported from another developer,
+// as noted under DESCRIPTION.
 //
 //
 // CODE
@@ -44,7 +45,7 @@
 //   - to override globals like dimensions
 //   - to override palette, specifying the config as "source" in written metadata
 
-String scriptVersion = "2.3.34";
+String scriptVersion = "2.4.18";
 String scriptName = "Mondrian_Processing";
 String paletteSource = "custom_mondrian";
 String lastAPIPaletteName = "";
@@ -59,8 +60,8 @@ boolean exportPNG = true;
 boolean exportSVG = true;
 
 // Layout settings - DYNAMIC GRID
-int artWidth = 1022;      // Width of the neo-or-postplastic artwork
-int artHeight = 1092;     // Height of the neo-or-postplastic artwork
+int artWidth = 1022;      // Width of the neo-or-postplastic artwork; an assumed "average" width from many surveyed works
+int artHeight = 1092;     // Height of the neo-or-postplastic artwork; an assumed "average" height from many surveyed works
 int gridSizeReference = 32;  // Reference grid size for the shorter dimension
 int uiPanelHeight = 135; // Height of the UI panel at bottom
 
@@ -93,10 +94,15 @@ boolean focusColorCount = false;
 int cursorBlinkTime;
 boolean cursorVisible;
 
-// MAKE MANY mode
+// MAKE MANY mode - frame-based state machine (no background thread)
 boolean makeManyMode = false;
-boolean stopRequested = false;
-Thread generationThread = null;
+boolean makeManyGenerating = false;
+int makeManyExportDelay = 0;
+boolean makeManyExportQueued = false;
+
+// Export flags for frame-synchronized capture
+boolean pendingExportPNG = false;
+boolean pendingExportSVG = false;
 
 // CUSTOM MONDRIAN PALETTE (inspired by color analysis of original works)
 // NOTE: #f6f6f6 (white) is EXCLUDED from this palette - it's reserved for canvas background only!
@@ -106,7 +112,7 @@ color[] customMondrianPalette = {
   #ffcf30,  // Golden yellow,
   #0f0c9b,  // Deep ultramarine blue,
   #5168a3,  // Muted slate blue,
-  #b1b1b1,   // Cool gray, and
+  #b1b1b1,  // Cool gray, and
   #050506   // Mondrian black
 };
 
@@ -671,58 +677,54 @@ void drawArtwork() {
 }
 
 void startMakeManyMode() {
-  if (generationThread != null && generationThread.isAlive()) {
-    return;
-  }
-  
-  stopRequested = false;
+  if (makeManyMode) return;
   makeManyMode = true;
-  
-  generationThread = new Thread(new Runnable() {
-    public void run() {
-      while (!stopRequested) {
-        // Generate new composition
-        crv();
-        patch();
-        colour();
-        
-        // Wait for rendering
-        try {
-          Thread.sleep(100);
-        } catch (InterruptedException e) {
-          break;
-        }
-        
-        // Save files
-        exportToPNG();
-        exportToSVG();
-        
-        println("--- MAKE MANY: Generated and saved variant ---");
-        
-        // Brief pause between generations
-        try {
-          Thread.sleep(500);
-        } catch (InterruptedException e) {
-          break;
-        }
-      }
-      
-      makeManyMode = false;
-      generationThread = null;
-      surface.setTitle(scriptName + " v" + scriptVersion);
-      println("MAKE MANY mode stopped.");
-    }
-  });
-  
-  generationThread.start();
+  makeManyGenerating = false;
+  makeManyExportDelay = 0;
+  makeManyExportQueued = false;
+  println("MAKE MANY mode started - generating and saving variations");
 }
 
 void stopMakeManyMode() {
-  stopRequested = true;
+  makeManyMode = false;
+  makeManyGenerating = false;
+  makeManyExportQueued = false;
+  println("MAKE MANY mode stopped.");
 }
 
 void draw() {
   background(CANVAS_WHITE);
+  
+  // MAKE MANY state machine
+  if (makeManyMode) {
+    if (makeManyExportDelay > 0) {
+      makeManyExportDelay--;
+    } else if (makeManyExportQueued) {
+      // Export now (after delay frames have passed)
+      if (exportPNG) pendingExportPNG = true;
+      if (exportSVG) pendingExportSVG = true;
+      makeManyExportQueued = false;
+      makeManyExportDelay = 2;  // Brief pause between cycles
+      println("--- MAKE MANY: Cycle complete ---");
+    } else if (!makeManyGenerating) {
+      // Start new generation
+      makeManyGenerating = true;
+      println("--- MAKE MANY: Generating variant ---");
+    }
+    
+    if (makeManyGenerating) {
+      calculateLineWeight();
+      minLineDistance = currentLineWeight * 2;
+      crv();
+      patch();
+      colour();
+      makeManyGenerating = false;
+      makeManyExportQueued = true;
+      makeManyExportDelay = 3;  // Wait 3 frames for rendering to stabilize
+      println("--- MAKE MANY: Exports queued (will export in " + makeManyExportDelay + " frames) ---");
+    }
+  }
+  
   drawArtwork();
   
   if (millis() - cursorBlinkTime > 500) {
@@ -886,16 +888,23 @@ void draw() {
     modeInfo = " | MAKE MANY ACTIVE - Click STOP to halt generation";
   }
   text("S - Save PNG/SVG | Click API COLORS to fetch new palette | Line weight varies per run (proportional to canvas width)" + modeInfo, width/2, height - 12);
+  
+  if (pendingExportPNG) {
+    exportToPNG();
+    pendingExportPNG = false;
+  }
+  if (pendingExportSVG) {
+    exportToSVG();
+    pendingExportSVG = false;
+  }
 }
 
 void mouseClicked() {
   int uiY = artHeight;
   int buttonWidth = 70;
   int buttonSpacing = 10;
-  
   int row1StartX = width - (buttonWidth * 4 + buttonSpacing * 3);
   int row1Y = uiY + 12;
-  
   int row2ButtonCount = 4;
   int row2TotalWidth = buttonWidth * row2ButtonCount + buttonSpacing * (row2ButtonCount - 1);
   int row2StartX = width - row2TotalWidth;
@@ -1097,17 +1106,18 @@ String getTimestamp() {
 
 void exportToPNG() {
   String timestamp = getTimestamp();
-  String filename = timestamp + "_" + scriptName + "_v" + scriptVersion + ".png";
+  String baseFilename = timestamp + "_" + scriptName + "_v" + scriptVersion;
+  String filename = baseFilename + ".png";
   
-  // Force a redraw and capture
-  redraw();
-  delay(50);
+  // Force rendering to complete before capture
+  loadPixels();
   
+  // Capture just the artwork area
   PImage artwork = get(0, 0, artWidth, artHeight);
   artwork.save(filename);
   
-  // Save metadata - using variables instead of hardcoded colors
-  String metadataFile = filename + ".metadata.txt";
+  // Save metadata as .txt with same base name
+  String metadataFile = baseFilename + ".txt";
   PrintWriter output = createWriter(metadataFile);
   output.println("Created with " + scriptName + ".pde v" + scriptVersion);
   output.println("Dimensions: " + artWidth + "x" + artHeight);
@@ -1142,7 +1152,8 @@ void exportToPNG() {
 
 void exportToSVG() {
   String timestamp = getTimestamp();
-  String filename = timestamp + "_" + scriptName + "_v" + scriptVersion + ".svg";
+  String baseFilename = timestamp + "_" + scriptName + "_v" + scriptVersion;
+  String filename = baseFilename + ".svg";
   
   PrintWriter output = createWriter(filename);
   
