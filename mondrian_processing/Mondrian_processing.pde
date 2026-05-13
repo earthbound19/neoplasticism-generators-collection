@@ -63,7 +63,7 @@
 //   - to override globals like dimensions
 //   - to override palette, specifying the config as "source" in written metadata
 
-String scriptVersion = "2.8.7";
+String scriptVersion = "2.8.11";
 String scriptName = "Mondrian_Processing";
 String paletteSource = "custom_mondrian";
 String lastAPIPaletteName = "";
@@ -78,12 +78,12 @@ boolean exportPNG = true;
 boolean exportSVG = true;
 
 // Layout settings
-// An assumed "average" art width and height from surveying many Mondrian works is; 1022 x 1092: this hard-coded
-// proportionally scales down from that to 720px high:
-int artWidth = 842;
-int artHeight = 900;
+// An assumed "average" art width and height from surveying many Mondrian works is; 839 x 886 px;
+// this hard-coded may proportionally scale down from that (aspect w/h = 0.9469) :
+int artWidth = 840;
+int artHeight = 886;
 int uiPanelHeight = 120;  // Height reserved for UI controls below artwork
-int gridSizeReference = 32;  // Reference grid size for the shorter dimension
+int gridSizeReference = 28;  // Reference grid size for the shorter dimension; orig. 32 and hard-coded may differ
 
 // Line weight configuration - PROPORTIONAL SCALING
 // Reference dimensions: max canvas width = 1022px
@@ -196,16 +196,14 @@ void setup() {
   
   // Initialize grammar generator; can pass any integer but counts will explode at higher numbers;
   // Generates grammars like A...B...C...D... with configurable max per letter; passing it 4 will
-  // allow up to 4 repetition of A, B, C or D:
+  // allow up to 4 repetition of A like AAAA, or B like BBBB, etc, or C or D:
   grammarGenerator = new GrammarGenerator(maxLetterRepetitionForGrammarGenerator);
   println("Grammar generator ready with " + grammarGenerator.getTotalCount() + " grammars");
 
-  // Calculate line weight based on current canvas width
   calculateLineWeight();
   
   background(CANVAS_WHITE);
   
-  // Calculate dynamic grid based on canvas proportions
   calculateGrid();
   minLineDistance = currentLineWeight * 2; // Minimum pixels between line centers
   
@@ -282,8 +280,6 @@ void resetStatusMessage() {
 }
 
 // Toggle event handlers with text color inversion
-// REPLACE the existing toggle event handlers (lines ~326-356) with these:
-
 void rapidLinesToggle(boolean value) {
   resetStatusMessage();
   rapidLines = value;
@@ -420,8 +416,8 @@ void calculateLineWeight() {
   float scaledMax = REFERENCE_MAX_WEIGHT * scaleFactor;
   
   // Apply lower bound clamping to prevent lines from being too thin
-  // Minimum practical line weight is 3px (anything smaller loses visual impact)
-  final float ABSOLUTE_MIN_WEIGHT = 3.0;
+  // Minimum practical line weight may be 3px
+  final float ABSOLUTE_MIN_WEIGHT = 4;
   if (scaledMin < ABSOLUTE_MIN_WEIGHT) {
     scaledMin = ABSOLUTE_MIN_WEIGHT;
     // Adjust max proportionally if min was clamped
@@ -501,7 +497,6 @@ void initCustomMondrianPalette() {
   paletteSource = "custom_mondrian";
   lastAPIPaletteName = "";
   lastAPIPaletteURL = "";
-  // Remove the broken line - activePalette is created in updateActivePalette()
   updateActivePalette();
   println("Using custom Mondrian palette with " + fullPalette.length + " colors");
 }
@@ -943,7 +938,7 @@ void generateRapidVariant() {
       rule = newGrammar;
       println("RAPID GRAMMAR: Applying: " + rule);  // Print to stdout
       
-      // Update the text field display (like API does)
+      // Update the text field display
       ruleField.setText(rule);
       // Force the text field to redraw
       ruleField.setColorBackground(color(64));
