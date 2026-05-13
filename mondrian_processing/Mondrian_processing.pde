@@ -15,7 +15,8 @@
 // - custom Mondrian palette with colors I reckon he used in his neoplastic paintings
 // - dynamic line weight scaling based on canvas width (proportional to 1022px reference)
 // - random line weight per sketch run (integer between scaled min/max)
-// - make many mode: infinite generation of variants with auto-save (frame-based state machine, no background threading)
+// - RAPID GEN mode: infinite generation of variants with auto-save (frame-based state machine, no background threading)
+// - RAPID GEN sub-modes: control whether lines, patches, colours, or API are shuffled (or called) per generation
 //
 // DEPENDENCIES
 // Processing
@@ -25,9 +26,10 @@
 // Run the sketch. Click on the rule text box to edit rules (type A/B/C/D). Click on percent box to edit percentage.
 // Press ENTER to generate a new composition based on the rule string.
 // Press S to save PNG and/or SVG (see booleans at top). Click PNG/SVG buttons to export (buttons override booleans).
-// Click "MAKE MANY" to enter generation mode (button toggles to STOP). In MAKE MANY mode, the sketch generates
-// and saves endless variations (new random curves + line weights) with the current grammar and color settings.
-// Click STOP (which the MAKE MANY button changes to when that mode is active) to halt generation.
+// Click "RAPID GEN" to enter generation mode (button toggles to STOP). In RAPID GEN mode, the sketch generates
+// and saves endless variations with the current grammar and color settings.
+// Use RAPID LINES, RAPID PATCH, RAPID COLOUR, and RAPID API to control which elements change per generation.
+// Click STOP (which the RAPID GEN button changes to when that mode is active) to halt generation.
 //
 // LICENSE
 // Creative Commons Share-Alike Attribution, by Richard Alexander Hall - 2026-05-12, ported from another developer,
@@ -39,13 +41,12 @@
 // - museum mode; only display artwork area, fullscreen, no UI controls, getting a new palette in the background
 //   for every new render, then doing the render when ready.
 // - in museum mode, every 7th iteration use Mondrian palette as throwback?
-// - rapid creation mode (many renders and PNG + SVG saves up to N renders)
 // - CLI mode accepting a JSON config and dynamically patching settings
 //   - to start any mode thereby also?
 //   - to override globals like dimensions
 //   - to override palette, specifying the config as "source" in written metadata
 
-String scriptVersion = "2.4.21";
+String scriptVersion = "2.5.0";
 String scriptName = "Mondrian_Processing";
 String paletteSource = "custom_mondrian";
 String lastAPIPaletteName = "";
@@ -54,6 +55,17 @@ String lastAPIPaletteURL = "";
 import processing.svg.*;
 import java.util.Collections;
 import java.util.Calendar;
+import controlP5.*;
+
+// ControlP5 components
+ControlP5 cp5;
+Textfield ruleField;
+Textfield percentField;
+Textfield colorCountField;
+Toggle rapidLinesToggle;
+Toggle rapidPatchToggle;
+Toggle rapidColourToggle;
+Toggle rapidAPIToggle;
 
 // Export settings
 boolean exportPNG = true;
@@ -64,8 +76,8 @@ boolean exportSVG = true;
 // proportionally scales down from that to 720px high:
 int artWidth = 842;
 int artHeight = 900;
+int uiPanelHeight = 120;  // Height reserved for UI controls below artwork
 int gridSizeReference = 32;  // Reference grid size for the shorter dimension
-int uiPanelHeight = 135; // Height of the UI panel at bottom
 
 // Line weight configuration - PROPORTIONAL SCALING
 // Reference dimensions: max canvas width = 1022px
@@ -84,23 +96,23 @@ int gridSizeX;           // Number of horizontal divisions
 int gridSizeY;           // Number of vertical divisions
 
 String rule = "AABBCCDDDDDD";
-String ruleInput = rule;
 float keep = 0.5;
-String percentText = "50";
-String colorCountText = "0";
 
-// Text input focus
-boolean focusRule = true;
-boolean focusPercent = false;
-boolean focusColorCount = false;
-int cursorBlinkTime;
-boolean cursorVisible;
+// RAPID GEN mode - frame-based state machine (no background thread)
+boolean rapidGenMode = false;
+boolean rapidGenGenerating = false;
+int rapidGenExportDelay = 0;
+boolean rapidGenExportQueued = false;
 
-// MAKE MANY mode - frame-based state machine (no background thread)
-boolean makeManyMode = false;
-boolean makeManyGenerating = false;
-int makeManyExportDelay = 0;
-boolean makeManyExportQueued = false;
+// RAPID GEN sub-modes
+boolean rapidLines = true;    // Shuffle lines with every new variant (default ON)
+boolean rapidPatch = true;    // Shuffle patches with every new variant (default ON)
+boolean rapidColour = true;   // Shuffle colours with every new variant (default ON)
+boolean rapidAPI = false;     // Fetch new palette for every variant (default OFF)
+boolean pendingAPICall = false;
+int apiCallStartTime = 0;
+boolean newPaletteReady = false;
+final int API_TIMEOUT_MS = 12000;  // 12 seconds timeout
 
 // Export flags for frame-synchronized capture
 boolean pendingExportPNG = false;
@@ -157,7 +169,7 @@ void settings() {
   
   canvasWidth = artWidth;
   canvasHeight = artHeight + uiPanelHeight;
-  
+
   size(canvasWidth, canvasHeight, P2D);
   
   // Disable global smoothing
@@ -176,18 +188,17 @@ void setup() {
   calculateGrid();
   minLineDistance = currentLineWeight * 2; // Minimum pixels between line centers
   
-  // Initialize with custom Mondrian palette
+  // Initialize ControlP5 UI FIRST so text fields exist for palette functions
+  setupControlP5();
+  
+  // Initialize with custom Mondrian palette (now safe - colorCountField exists)
   initCustomMondrianPalette();
   
-  cursorBlinkTime = millis();
-  cursorVisible = true;
-  focusRule = true;
-  focusPercent = false;
-  focusColorCount = false;
+  // Update the color count field with actual palette size
+  colorCountField.setText(str(fullPalette.length));
   
   crv();
   patch();
-  updateActivePalette();
   colour();
 
   // CRITICAL FIX: Force nearest-neighbor sampling
@@ -199,6 +210,272 @@ void setup() {
   println("Line weight: " + currentLineWeight + "px (scaled from " + artWidth + "px width)");
   println("Min line distance: " + minLineDistance + "px");
   println("Using custom Mondrian palette with " + fullPalette.length + " colors (white reserved for canvas)");
+}
+
+void setupControlP5() {
+  cp5 = new ControlP5(this);
+  
+  // Set global default style for all controllers
+  cp5.setColorBackground(color(80));
+  cp5.setColorForeground(color(100));
+  cp5.setColorActive(color(120));
+  
+  int uiY = artHeight;
+  int fieldWidth = 120;
+  int smallFieldWidth = 60;
+  int spacing = 10;
+  int rowHeight = 25;
+  int labelX = 20;
+  int fieldY = uiY + 10;
+  
+  // Text Field: Rule String
+  ruleField = cp5.addTextfield("ruleField")
+     .setPosition(labelX, fieldY)
+     .setSize(fieldWidth, rowHeight)
+     .setText(rule)
+     .setLabel("Rule String")
+     .setAutoClear(false)
+     .setColorCaptionLabel(color(255)); // White text for label
+
+  // Text Field: Fill %
+  percentField = cp5.addTextfield("percentField")
+     .setPosition(labelX + fieldWidth + spacing, fieldY)
+     .setSize(smallFieldWidth, rowHeight)
+     .setText(str(int(keep * 100)))
+     .setLabel("Fill %")
+     .setAutoClear(false)
+     .setColorCaptionLabel(color(255));
+
+  // Text Field: Colors (placeholder)
+  colorCountField = cp5.addTextfield("colorCountField")
+     .setPosition(labelX + fieldWidth + spacing + smallFieldWidth + spacing, fieldY)
+     .setSize(smallFieldWidth, rowHeight)
+     .setText("7")
+     .setLabel("Colors (0=all)")
+     .setAutoClear(false)
+     .setColorCaptionLabel(color(255));
+  
+  // Rapid Mode Toggles (Second Row)
+  int toggleY = fieldY + rowHeight + 15;
+  int toggleWidth = 70;
+  
+  rapidLinesToggle = cp5.addToggle("rapidLinesToggle")
+     .setPosition(labelX, toggleY)
+     .setSize(toggleWidth, rowHeight)
+     .setValue(rapidLines ? 1 : 0)
+     .setLabel("RAPID LINES")
+     .setColorBackground(color(80))
+     .setColorForeground(color(100))
+     .setColorActive(color(255))
+     .setColorCaptionLabel(color(255));
+  
+  rapidPatchToggle = cp5.addToggle("rapidPatchToggle")
+     .setPosition(labelX + toggleWidth + spacing, toggleY)
+     .setSize(toggleWidth, rowHeight)
+     .setValue(rapidPatch ? 1 : 0)
+     .setLabel("RAPID PATCH")
+     .setColorBackground(color(80))
+     .setColorForeground(color(100))
+     .setColorActive(color(255))
+     .setColorCaptionLabel(color(255));
+  
+  rapidColourToggle = cp5.addToggle("rapidColourToggle")
+     .setPosition(labelX + (toggleWidth + spacing) * 2, toggleY)
+     .setSize(toggleWidth, rowHeight)
+     .setValue(rapidColour ? 1 : 0)
+     .setLabel("RAPID COLOUR")
+     .setColorBackground(color(80))
+     .setColorForeground(color(100))
+     .setColorActive(color(255))
+     .setColorCaptionLabel(color(255));
+  
+  rapidAPIToggle = cp5.addToggle("rapidAPIToggle")
+     .setPosition(labelX + (toggleWidth + spacing) * 3, toggleY)
+     .setSize(toggleWidth, rowHeight)
+     .setValue(rapidAPI ? 1 : 0)
+     .setLabel("RAPID API")
+     .setColorBackground(color(80))
+     .setColorForeground(color(100))
+     .setColorActive(color(255))
+     .setColorCaptionLabel(color(255));
+  
+  // Main Control Buttons (Right Side)
+  int buttonWidth = 70;
+  int rightX = width - (buttonWidth * 4 + spacing * 3);
+  
+  cp5.addButton("resetAll")
+     .setPosition(rightX, fieldY)
+     .setSize(buttonWidth, rowHeight)
+     .setLabel("RESET ALL")
+     .setColorCaptionLabel(color(255));
+  
+  cp5.addButton("shuffleLines")
+     .setPosition(rightX + buttonWidth + spacing, fieldY)
+     .setSize(buttonWidth, rowHeight)
+     .setLabel("SHUFFLE LINES")
+     .setColorCaptionLabel(color(255));
+  
+  cp5.addButton("shufflePatch")
+     .setPosition(rightX + (buttonWidth + spacing) * 2, fieldY)
+     .setSize(buttonWidth, rowHeight)
+     .setLabel("SHUFFLE PATCH")
+     .setColorCaptionLabel(color(255));
+  
+  cp5.addButton("shuffleColour")
+     .setPosition(rightX + (buttonWidth + spacing) * 3, fieldY)
+     .setSize(buttonWidth, rowHeight)
+     .setLabel("SHUFFLE COLOUR")
+     .setColorCaptionLabel(color(255));
+  
+  // Second Row Buttons (Export, Mode)
+  int secondRowY = fieldY + rowHeight + spacing;
+  
+  cp5.addButton("rapidGenToggle")
+     .setPosition(rightX, secondRowY)
+     .setSize(buttonWidth, rowHeight)
+     .setLabel("RAPID GEN")
+     .setColorCaptionLabel(color(255));
+  
+  cp5.addButton("apiColors")
+     .setPosition(rightX + buttonWidth + spacing, secondRowY)
+     .setSize(buttonWidth, rowHeight)
+     .setLabel("API COLORS")
+     .setColorCaptionLabel(color(255));
+  
+  cp5.addButton("exportPNGButton")
+     .setPosition(rightX + (buttonWidth + spacing) * 2, secondRowY)
+     .setSize(buttonWidth, rowHeight)
+     .setLabel("EXPORT PNG")
+     .setColorCaptionLabel(color(255));
+  
+  cp5.addButton("exportSVGButton")
+     .setPosition(rightX + (buttonWidth + spacing) * 3, secondRowY)
+     .setSize(buttonWidth, rowHeight)
+     .setLabel("EXPORT SVG")
+     .setColorCaptionLabel(color(255));
+}
+
+void ruleField(String value) {
+  // Filter to only A,B,C,D
+  String cleaned = "";
+  for (int i = 0; i < value.length(); i++) {
+    char c = Character.toUpperCase(value.charAt(i));
+    if (c == 'A' || c == 'B' || c == 'C' || c == 'D') {
+      cleaned += c;
+    }
+  }
+  if (cleaned.length() > 0) {
+    rule = cleaned;
+    ruleField.setText(rule);
+    if (!rapidGenMode) {
+      crv();
+      patch();
+      colour();
+    }
+  }
+}
+
+void percentField(String value) {
+  int percent = int(value);
+  if (percent >= 0 && percent <= 100) {
+    keep = percent / 100.0;
+    if (!rapidGenMode) {
+      patch();
+    }
+  }
+}
+
+void colorCountField(String value) {
+  int limit = int(value);
+  if (limit < 0) limit = 0;
+  if (fullPalette != null && limit > fullPalette.length) limit = fullPalette.length;
+  colorCountField.setText(str(limit));
+  updateActivePalette();
+  if (!rapidGenMode) {
+    colour();
+  }
+}
+
+// Toggle event handlers
+void rapidLinesToggle(boolean value) {
+  rapidLines = value;
+  println("Rapid Lines: " + (rapidLines ? "ON" : "OFF"));
+}
+
+void rapidPatchToggle(boolean value) {
+  rapidPatch = value;
+  println("Rapid Patch: " + (rapidPatch ? "ON" : "OFF"));
+}
+
+void rapidColourToggle(boolean value) {
+  rapidColour = value;
+  println("Rapid Colour: " + (rapidColour ? "ON" : "OFF"));
+}
+
+void rapidAPIToggle(boolean value) {
+  rapidAPI = value;
+  println("Rapid API: " + (rapidAPI ? "ON" : "OFF"));
+}
+
+// Button event handlers
+void resetAll() {
+  if (rapidGenMode) stopRapidGenMode();
+  rule = "AABBCCDDDDDD";
+  ruleField.setText(rule);
+  keep = 0.5;
+  percentField.setText("50");
+  initCustomMondrianPalette();
+  colorCountField.setText(str(fullPalette.length));
+  crv();
+  patch();
+  colour();
+}
+
+void shuffleLines() {
+  if (!rapidGenMode) {
+    crv();
+    patch();
+  } else {
+    println("Can't shuffle while RAPID GEN active");
+  }
+}
+
+void shufflePatch() {
+  if (!rapidGenMode) {
+    patch();
+  } else {
+    println("Can't shuffle while RAPID GEN active");
+  }
+}
+
+void shuffleColour() {
+  if (!rapidGenMode) {
+    colour();
+  } else {
+    println("Can't shuffle while RAPID GEN active");
+  }
+}
+
+void rapidGenToggle() {
+  if (rapidGenMode) {
+    stopRapidGenMode();
+    cp5.get(Button.class, "rapidGenToggle").setLabel("RAPID GEN");
+  } else {
+    startRapidGenMode();
+    cp5.get(Button.class, "rapidGenToggle").setLabel("STOP");
+  }
+}
+
+void apiColors() {
+  fetchColorsFromAPI();
+}
+
+void exportPNGButton() {
+  exportToPNG();
+}
+
+void exportSVGButton() {
+  exportToSVG();
 }
 
 void calculateLineWeight() {
@@ -291,13 +568,14 @@ void initCustomMondrianPalette() {
   paletteSource = "custom_mondrian";
   lastAPIPaletteName = "";
   lastAPIPaletteURL = "";
-  colorCountText = str(fullPalette.length);
+  // Remove the broken line - activePalette is created in updateActivePalette()
   updateActivePalette();
   println("Using custom Mondrian palette with " + fullPalette.length + " colors");
 }
 
 void updateActivePalette() {
-  int limit = int(colorCountText);
+  // Get limit from the text field, not from activePalette (which may be null)
+  int limit = int(colorCountField.getText());
   if (limit <= 0 || limit >= fullPalette.length) {
     activePalette = new color[fullPalette.length];
     for (int i = 0; i < fullPalette.length; i++) {
@@ -342,17 +620,18 @@ void fetchColorsFromAPI() {
           fullPalette[i] = newPalette[i];
         }
         paletteSource = "api";
-        colorCountText = str(fullPalette.length);
         updateActivePalette();
-        colour();
+        
+        // Signal that new palette is ready
+        newPaletteReady = true;
         
         println("Successfully loaded " + fullPalette.length + " colors from API");
         println("Palette name: " + lastAPIPaletteName);
         println("Palette URL: " + lastAPIPaletteURL);
       } catch (Exception e) {
         println("API fetch failed: " + e.getMessage());
-        lastAPIPaletteName = "";
-        lastAPIPaletteURL = "";
+        // On failure, signal that call is done but no new palette
+        newPaletteReady = true;
       }
     }
   });
@@ -678,218 +957,120 @@ void drawArtwork() {
   }
 }
 
-void startMakeManyMode() {
-  if (makeManyMode) return;
-  makeManyMode = true;
-  makeManyGenerating = false;
-  makeManyExportDelay = 0;
-  makeManyExportQueued = false;
-  println("MAKE MANY mode started - generating and saving variations");
+void startRapidGenMode() {
+  if (rapidGenMode) return;
+  rapidGenMode = true;
+  rapidGenGenerating = false;
+  rapidGenExportDelay = 0;
+  rapidGenExportQueued = false;
+  println("RAPID GEN mode started - generating and saving variations");
+  println("  Rapid Lines: " + (rapidLines ? "ON" : "OFF"));
+  println("  Rapid Patch: " + (rapidPatch ? "ON" : "OFF"));
+  println("  Rapid Colour: " + (rapidColour ? "ON" : "OFF"));
+  println("  Rapid API: " + (rapidAPI ? "ON" : "OFF"));
 }
 
-void stopMakeManyMode() {
-  makeManyMode = false;
-  makeManyGenerating = false;
-  makeManyExportQueued = false;
-  println("MAKE MANY mode stopped.");
+void stopRapidGenMode() {
+  rapidGenMode = false;
+  rapidGenGenerating = false;
+  rapidGenExportQueued = false;
+  // Clear any pending API calls
+  pendingAPICall = false;
+  newPaletteReady = false;
+  println("RAPID GEN mode stopped.");
+}
+
+void generateRapidVariant() {
+  // Perform operations based on rapid mode flags
+  if (rapidLines) {
+    crv();  // Generates new line configuration and random line weight
+  }
+  // If rapidLines is OFF, we don't change lines or line weight
+  
+  if (rapidPatch) {
+    patch();  // Shuffle which patches are colored
+  }
+  
+  if (rapidColour) {
+    colour();  // Shuffle colors assignment
+  }
+  
+  // API handling is separate and happens in draw()
 }
 
 void draw() {
   background(CANVAS_WHITE);
   
-  // MAKE MANY state machine
-  if (makeManyMode) {
-    if (makeManyExportDelay > 0) {
-      makeManyExportDelay--;
-    } else if (makeManyExportQueued) {
+  // RAPID GEN state machine
+  if (rapidGenMode) {
+    // Check for pending API response if rapidAPI is on
+    if (rapidAPI && pendingAPICall) {
+      // Check for timeout
+      if (millis() - apiCallStartTime > API_TIMEOUT_MS) {
+        println("RAPID API: Timeout after 12 seconds - continuing with existing palette");
+        pendingAPICall = false;
+        newPaletteReady = false;
+      } else if (newPaletteReady) {
+        // API call completed successfully (or failed but newPaletteReady flagged)
+        if (fullPalette != null && fullPalette.length > 0) {
+          updateActivePalette();
+          colour();  // Recolor with new palette
+          println("RAPID API: New palette applied (" + fullPalette.length + " colors)");
+        }
+        pendingAPICall = false;
+        newPaletteReady = false;
+      } else {
+        // Still waiting for API - pause generation cycle
+        // Don't proceed with generation until API responds
+        // We'll just redraw current artwork
+        drawArtwork();
+        // Don't return - let exports still happen
+      }
+    }
+    
+    if (rapidGenExportDelay > 0) {
+      rapidGenExportDelay--;
+    } else if (rapidGenExportQueued) {
       // Export now (after delay frames have passed)
       if (exportPNG) pendingExportPNG = true;
       if (exportSVG) pendingExportSVG = true;
-      makeManyExportQueued = false;
-      makeManyExportDelay = 2;  // Brief pause between cycles
-      println("--- MAKE MANY: Cycle complete ---");
-    } else if (!makeManyGenerating) {
+      rapidGenExportQueued = false;
+      rapidGenExportDelay = 2;  // Brief pause between cycles
+      println("--- RAPID GEN: Cycle complete ---");
+    } else if (!rapidGenGenerating) {
       // Start new generation
-      makeManyGenerating = true;
-      println("--- MAKE MANY: Generating variant ---");
-    }
-    
-    if (makeManyGenerating) {
-      calculateLineWeight();
-      minLineDistance = currentLineWeight * 2;
-      crv();
-      patch();
-      colour();
-      makeManyGenerating = false;
-      makeManyExportQueued = true;
-      makeManyExportDelay = 3;  // Wait 3 frames for rendering to stabilize
-      println("--- MAKE MANY: Exports queued (will export in " + makeManyExportDelay + " frames) ---");
+      rapidGenGenerating = true;
+      println("--- RAPID GEN: Generating variant ---");
+      
+      generateRapidVariant();
+      
+      // Trigger API call if rapidAPI is on and no pending call
+      if (rapidAPI && !pendingAPICall) {
+        pendingAPICall = true;
+        newPaletteReady = false;
+        apiCallStartTime = millis();
+        fetchColorsFromAPI();
+        println("RAPID API: Fetching new palette...");
+        // Note: We already generated the variant, now wait for API to update colors for NEXT cycle
+      }
+      
+      rapidGenGenerating = false;
+      rapidGenExportQueued = true;
+      rapidGenExportDelay = 3;  // Wait 3 frames for rendering to stabilize
+      println("--- RAPID GEN: Exports queued (will export in " + rapidGenExportDelay + " frames) ---");
     }
   }
   
   drawArtwork();
   
-  if (millis() - cursorBlinkTime > 500) {
-    cursorBlinkTime = millis();
-    cursorVisible = !cursorVisible;
-  }
-  
-  int uiY = artHeight;
-  rectMode(CORNERS);
-  noStroke();
-  fill(50);
-  rect(0, uiY, width, height);
-  
-  int buttonWidth = 70;
-  int buttonHeight = 28;
-  int buttonSpacing = 10;
-  int startX = width - (buttonWidth * 4 + buttonSpacing * 3);
-  int row1Y = uiY + 12;
-  int row2Y = uiY + 50;
-  
-  // Row 1 buttons
-  fill(80);
-  rect(startX, row1Y, startX + buttonWidth, row1Y + buttonHeight);
-  rect(startX + buttonWidth + buttonSpacing, row1Y, startX + buttonWidth * 2 + buttonSpacing, row1Y + buttonHeight);
-  rect(startX + (buttonWidth + buttonSpacing) * 2, row1Y, startX + buttonWidth * 3 + buttonSpacing * 2, row1Y + buttonHeight);
-  rect(startX + (buttonWidth + buttonSpacing) * 3, row1Y, startX + buttonWidth * 4 + buttonSpacing * 3, row1Y + buttonHeight);
-  
-  fill(255);
+  // Draw simple status line (replaces old drawUI)
+  fill(200);
   textSize(10);
-  textAlign(CENTER, CENTER);
-  text("RESET ALL", startX + buttonWidth/2, row1Y + buttonHeight/2);
-  text("SHUFFLE\nCURVE", startX + buttonWidth + buttonSpacing + buttonWidth/2, row1Y + buttonHeight/2);
-  text("SHUFFLE\nPATCH", startX + (buttonWidth + buttonSpacing) * 2 + buttonWidth/2, row1Y + buttonHeight/2);
-  text("SHUFFLE\nCOLOUR", startX + (buttonWidth + buttonSpacing) * 3 + buttonWidth/2, row1Y + buttonHeight/2);
-  
-  // Row 2 buttons
-  int row2ButtonCount = 4;
-  int row2TotalWidth = buttonWidth * row2ButtonCount + buttonSpacing * (row2ButtonCount - 1);
-  int row2StartX = width - row2TotalWidth;
-  
-  fill(80);
-  rect(row2StartX, row2Y, row2StartX + buttonWidth, row2Y + buttonHeight);
-  rect(row2StartX + buttonWidth + buttonSpacing, row2Y, row2StartX + buttonWidth * 2 + buttonSpacing, row2Y + buttonHeight);
-  rect(row2StartX + (buttonWidth + buttonSpacing) * 2, row2Y, row2StartX + buttonWidth * 3 + buttonSpacing * 2, row2Y + buttonHeight);
-  rect(row2StartX + (buttonWidth + buttonSpacing) * 3, row2Y, row2StartX + buttonWidth * 4 + buttonSpacing * 3, row2Y + buttonHeight);
-  
-  fill(255);
-  if (makeManyMode) {
-    text("STOP", row2StartX + buttonWidth/2, row2Y + buttonHeight/2);
-  } else {
-    text("MAKE\nMANY", row2StartX + buttonWidth/2, row2Y + buttonHeight/2);
-  }
-  text("API\nCOLORS", row2StartX + buttonWidth + buttonSpacing + buttonWidth/2, row2Y + buttonHeight/2);
-  text("EXPORT\nPNG", row2StartX + (buttonWidth + buttonSpacing) * 2 + buttonWidth/2, row2Y + buttonHeight/2);
-  text("EXPORT\nSVG", row2StartX + (buttonWidth + buttonSpacing) * 3 + buttonWidth/2, row2Y + buttonHeight/2);
-  
-  // Input fields
-  int inputX = 20;
-  int inputY = uiY + 12;
-  int ruleWidth = 140;
-  int percentWidth = 50;
-  int colorCountWidth = 50;
-  int inputHeight = 28;
-  int spacing = 8;
-  
-  // Rule input
-  if (focusRule) {
-    stroke(100);
-    strokeWeight(2);
-  } else {
-    noStroke();
-  }
-  fill(255);
-  rect(inputX, inputY, inputX + ruleWidth, inputY + inputHeight);
-  fill(0);
   textAlign(LEFT, CENTER);
-  textSize(11);
-  text(ruleInput, inputX + 5, inputY + inputHeight/2);
-  if (focusRule && cursorVisible) {
-    float textW = textWidth(ruleInput);
-    stroke(0);
-    strokeWeight(1);
-    line(inputX + 5 + textW, inputY + 5, inputX + 5 + textW, inputY + inputHeight - 5);
-  }
-  
-  // Percentage input
-  int percentX = inputX + ruleWidth + spacing;
-  if (focusPercent) {
-    stroke(100);
-    strokeWeight(2);
-  } else {
-    noStroke();
-  }
-  fill(255);
-  rect(percentX, inputY, percentX + percentWidth, inputY + inputHeight);
-  fill(0);
-  textAlign(CENTER, CENTER);
-  text(percentText, percentX + percentWidth/2, inputY + inputHeight/2);
-  if (focusPercent && cursorVisible) {
-    float textW = textWidth(percentText);
-    stroke(0);
-    strokeWeight(1);
-    line(percentX + percentWidth/2 + textW/2, inputY + 5,
-         percentX + percentWidth/2 + textW/2, inputY + inputHeight - 5);
-  }
-  
-  // Color count input
-  int colorCountX = percentX + percentWidth + spacing;
-  if (focusColorCount) {
-    stroke(100);
-    strokeWeight(2);
-  } else {
-    noStroke();
-  }
-  fill(255);
-  rect(colorCountX, inputY, colorCountX + colorCountWidth, inputY + inputHeight);
-  fill(0);
-  textAlign(CENTER, CENTER);
-  text(colorCountText, colorCountX + colorCountWidth/2, inputY + inputHeight/2);
-  if (focusColorCount && cursorVisible) {
-    float textW = textWidth(colorCountText);
-    stroke(0);
-    strokeWeight(1);
-    line(colorCountX + colorCountWidth/2 + textW/2, inputY + 5,
-         colorCountX + colorCountWidth/2 + textW/2, inputY + inputHeight - 5);
-  }
-  
-  // Labels
-  noStroke();
-  fill(200);
-  textSize(9);
-  textAlign(LEFT, CENTER);
-  text("Rule String (ENTER to apply)", inputX, inputY + inputHeight + 12);
-  text("Fill %", percentX + percentWidth/2, inputY + inputHeight + 12);
-  text("Colors\n(0=all)", colorCountX + colorCountWidth/2, inputY + inputHeight + 12);
-  
-  // Version and instructions
-  String paletteInfo = " | Palette: " + paletteSource;
-  if (paletteSource.equals("api") && lastAPIPaletteName.length() > 0) {
-    paletteInfo += " - " + lastAPIPaletteName;
-  }
-  if (fullPalette != null) {
-    paletteInfo += " (" + fullPalette.length + " colors";
-    if (activePalette != null) {
-      paletteInfo += ", using " + activePalette.length;
-    }
-    paletteInfo += ")";
-  }
-  
-  // Add line weight info to status display
-  String lineWeightInfo = " | Line weight: " + nf(currentLineWeight, 0, 0) + "px";
-  
-  fill(200);
-  textAlign(LEFT, CENTER);
-  textSize(9);
-  text(scriptName + " v" + scriptVersion + " | " + artWidth + "x" + artHeight + " | Grid: " + gridSizeX + "x" + gridSizeY + paletteInfo + lineWeightInfo, 20, height - 25);
-  
-  textAlign(CENTER, CENTER);
-  String modeInfo = "";
-  if (makeManyMode) {
-    modeInfo = " | MAKE MANY ACTIVE - Click STOP to halt generation";
-  }
-  text("S - Save PNG/SVG | Click API COLORS to fetch new palette | Line weight varies per run (proportional to canvas width)" + modeInfo, width/2, height - 12);
+  String status = scriptName + " v" + scriptVersion + " | Line weight: " + nf(currentLineWeight, 0, 0) + "px";
+  if (rapidGenMode) status += " | RAPID GEN ACTIVE";
+  if (rapidAPI && pendingAPICall) status += " | Waiting for API...";
+  text(status, 20, height - 10);
   
   if (pendingExportPNG) {
     exportToPNG();
@@ -899,204 +1080,6 @@ void draw() {
     exportToSVG();
     pendingExportSVG = false;
   }
-}
-
-void mouseClicked() {
-  int uiY = artHeight;
-  int buttonWidth = 70;
-  int buttonSpacing = 10;
-  int row1StartX = width - (buttonWidth * 4 + buttonSpacing * 3);
-  int row1Y = uiY + 12;
-  int row2ButtonCount = 4;
-  int row2TotalWidth = buttonWidth * row2ButtonCount + buttonSpacing * (row2ButtonCount - 1);
-  int row2StartX = width - row2TotalWidth;
-  int row2Y = uiY + 50;
-  
-  // Row 1 buttons
-  if (mouseX > row1StartX && mouseX < row1StartX + buttonWidth && mouseY > row1Y && mouseY < row1Y + 28) {
-    if (makeManyMode) stopMakeManyMode();
-    rule = "AABBCCDDDDDD";
-    ruleInput = rule;
-    keep = 0.5;
-    percentText = "50";
-    initCustomMondrianPalette();
-    focusRule = true;
-    focusPercent = false;
-    focusColorCount = false;
-    crv();
-    patch();
-    colour();
-    return;
-  }
-  
-  if (mouseX > row1StartX + buttonWidth + buttonSpacing && mouseX < row1StartX + buttonWidth * 2 + buttonSpacing && 
-      mouseY > row1Y && mouseY < row1Y + 28) {
-    if (makeManyMode) stopMakeManyMode();
-    crv();
-    patch();
-    return;
-  }
-  
-  if (mouseX > row1StartX + (buttonWidth + buttonSpacing) * 2 && mouseX < row1StartX + buttonWidth * 3 + buttonSpacing * 2 && 
-      mouseY > row1Y && mouseY < row1Y + 28) {
-    patch();
-    return;
-  }
-  
-  if (mouseX > row1StartX + (buttonWidth + buttonSpacing) * 3 && mouseX < row1StartX + buttonWidth * 4 + buttonSpacing * 3 && 
-      mouseY > row1Y && mouseY < row1Y + 28) {
-    colour();
-    return;
-  }
-  
-  // Row 2 buttons
-  if (mouseX > row2StartX && mouseX < row2StartX + buttonWidth && mouseY > row2Y && mouseY < row2Y + 28) {
-    if (makeManyMode) {
-      stopMakeManyMode();
-    } else {
-      startMakeManyMode();
-    }
-    return;
-  }
-  
-  if (mouseX > row2StartX + buttonWidth + buttonSpacing && mouseX < row2StartX + buttonWidth * 2 + buttonSpacing && 
-      mouseY > row2Y && mouseY < row2Y + 28) {
-    fetchColorsFromAPI();
-    return;
-  }
-  
-  if (mouseX > row2StartX + (buttonWidth + buttonSpacing) * 2 && mouseX < row2StartX + buttonWidth * 3 + buttonSpacing * 2 && 
-      mouseY > row2Y && mouseY < row2Y + 28) {
-    exportToPNG();
-    return;
-  }
-  
-  if (mouseX > row2StartX + (buttonWidth + buttonSpacing) * 3 && mouseX < row2StartX + buttonWidth * 4 + buttonSpacing * 3 && 
-      mouseY > row2Y && mouseY < row2Y + 28) {
-    exportToSVG();
-    return;
-  }
-  
-  // Text field clicks
-  int inputX = 20;
-  int ruleWidth = 140;
-  int percentWidth = 50;
-  int colorCountWidth = 50;
-  int spacing = 8;
-  int inputY = uiY + 12;
-  int inputHeight = 28;
-  
-  if (mouseX > inputX && mouseX < inputX + ruleWidth && mouseY > inputY && mouseY < inputY + inputHeight) {
-    focusRule = true;
-    focusPercent = false;
-    focusColorCount = false;
-    cursorBlinkTime = millis();
-    cursorVisible = true;
-    return;
-  }
-  
-  int percentX = inputX + ruleWidth + spacing;
-  if (mouseX > percentX && mouseX < percentX + percentWidth && mouseY > inputY && mouseY < inputY + inputHeight) {
-    focusRule = false;
-    focusPercent = true;
-    focusColorCount = false;
-    cursorBlinkTime = millis();
-    cursorVisible = true;
-    return;
-  }
-  
-  int colorCountX = percentX + percentWidth + spacing;
-  if (mouseX > colorCountX && mouseX < colorCountX + colorCountWidth && mouseY > inputY && mouseY < inputY + inputHeight) {
-    focusRule = false;
-    focusPercent = false;
-    focusColorCount = true;
-    cursorBlinkTime = millis();
-    cursorVisible = true;
-    return;
-  }
-  
-  focusRule = false;
-  focusPercent = false;
-  focusColorCount = false;
-}
-
-void keyPressed() {
-  if (focusPercent) {
-    if (key >= '0' && key <= '9') {
-      String newText = percentText;
-      if (newText.equals("0") && key != '0') {
-        newText = "" + key;
-      } else if (newText.length() < 3) {
-        newText = newText + key;
-      }
-      int percent = int(newText);
-      if (percent >= 0 && percent <= 100) {
-        percentText = newText;
-        // keep and patch NOT updated here
-      }
-    } else if ((key == BACKSPACE || key == DELETE) && percentText.length() > 0) {
-      percentText = percentText.substring(0, percentText.length() - 1);
-      if (percentText.length() == 0) percentText = "0";
-      // keep and patch NOT updated here
-    } else if (key == ENTER) {
-      int percent = int(percentText);
-      if (percent >= 0 && percent <= 100) {
-        keep = percent / 100.0;
-        patch();
-      }
-    }
-  } else if (focusColorCount) {
-    if (key >= '0' && key <= '9') {
-      String newText = colorCountText;
-      if (newText.equals("0") && key != '0') {
-        newText = "" + key;
-      } else if (newText.length() < 3) {
-        newText = newText + key;
-      }
-      colorCountText = newText;
-    } else if ((key == BACKSPACE || key == DELETE) && colorCountText.length() > 0) {
-      colorCountText = colorCountText.substring(0, colorCountText.length() - 1);
-      if (colorCountText.length() == 0) colorCountText = "0";
-    } else if (key == ENTER) {
-      int limit = int(colorCountText);
-      if (limit < 0) limit = 1;
-      if (fullPalette != null && limit > fullPalette.length) limit = fullPalette.length;
-      colorCountText = str(limit);
-      updateActivePalette();
-      colour();
-    }
-  } else if (focusRule) {
-    if (key == ENTER) {
-      String cleaned = "";
-      for (int i = 0; i < ruleInput.length(); i++) {
-        char c = Character.toUpperCase(ruleInput.charAt(i));
-        if (c == 'A' || c == 'B' || c == 'C' || c == 'D') {
-          cleaned += c;
-        }
-      }
-      if (cleaned.length() > 0) {
-        rule = cleaned;
-        ruleInput = cleaned;
-        crv();
-        patch();
-        colour();
-      }
-    } else if ((key == BACKSPACE || key == DELETE) && ruleInput.length() > 0) {
-      ruleInput = ruleInput.substring(0, ruleInput.length() - 1);
-    } else if (key != CODED && key != ENTER && key != BACKSPACE && key != DELETE) {
-      if (ruleInput.length() < 32) {
-        ruleInput = ruleInput + key;
-      }
-    }
-  }
-  
-  if (key == 's' || key == 'S') {
-    if (exportPNG) exportToPNG();
-    if (exportSVG) exportToSVG();
-  }
-  
-  cursorBlinkTime = millis();
-  cursorVisible = true;
 }
 
 String getTimestamp() {
@@ -1125,7 +1108,7 @@ void exportToPNG() {
   output.println("Dimensions: " + artWidth + "x" + artHeight);
   output.println("Grid: " + gridSizeX + "x" + gridSizeY);
   output.println("Grammar: " + rule);
-  output.println("Fill percentage: " + percentText + "%");
+  output.println("Fill percentage: " + int(keep * 100) + "%");
   output.println("Line weight: " + currentLineWeight + "px (proportional to " + artWidth + "px width)");
   output.println("Line color: #" + hex(LINE_COLOR, 6));
   output.println("Canvas white: #" + hex(CANVAS_WHITE, 6));
@@ -1144,9 +1127,9 @@ void exportToPNG() {
       output.println("#" + hex(fullPalette[i], 6));
     }
   }
-  if (activePalette != null) {
-    output.println("Active colors: " + activePalette.length);
-  }
+
+  output.println("Active colors: " + activePalette.length);
+
   output.flush();
   output.close();
   println("Saved PNG: " + filename);
@@ -1179,7 +1162,7 @@ void exportToSVG() {
   output.println("          Dimensions: " + artWidth + "x" + artHeight);
   output.println("          Grid: " + gridSizeX + "x" + gridSizeY);
   output.println("          Grammar: " + rule);
-  output.println("          Fill percentage: " + percentText + "%");
+  output.println("          Fill percentage: " + int(keep * 100) + "%");
   output.println("          Line weight: " + currentLineWeight + "px");
   output.println("          Line color: #" + hex(LINE_COLOR, 6));
   output.println("          Canvas white: #" + hex(CANVAS_WHITE, 6));
