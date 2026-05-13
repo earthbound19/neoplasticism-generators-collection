@@ -46,7 +46,7 @@
 //   - to override globals like dimensions
 //   - to override palette, specifying the config as "source" in written metadata
 
-String scriptVersion = "2.6.14";
+String scriptVersion = "2.7.16";
 String scriptName = "Mondrian_Processing";
 String paletteSource = "custom_mondrian";
 String lastAPIPaletteName = "";
@@ -218,7 +218,7 @@ void setup() {
 void setupControlP5() {
   cp5 = new ControlP5(this);
   
-  cp5.setColorBackground(color(80));
+  cp5.setColorBackground(color(30));
   cp5.setColorForeground(color(100));
   cp5.setColorActive(color(120));
   
@@ -254,68 +254,71 @@ void setupControlP5() {
      .setAutoClear(false)
      .setColorCaptionLabel(color(255));
   
+// REPLACE the existing toggle setup section (from line ~219 to ~252) with this:
+
   int toggleY = fieldY + rowHeight + 15;
   int toggleWidth = 70;
   
-  rapidLinesToggle = cp5.addToggle("rapidLinesToggle")
+  // Common styling for all four toggles
+  color offColor = color(64);     // Dark gray when OFF
+  color onColor = color(255);     // White when ON
+  color hoverColor = color(100);  // Medium gray on hover
+  
+//rapidLinesToggle
+rapidLinesToggle = cp5.addToggle("rapidLinesToggle")
      .setPosition(labelX, toggleY)
      .setSize(toggleWidth, rowHeight)
      .setBroadcast(false)
      .setValue(rapidLines ? 1 : 0)
      .setBroadcast(true)
      .setLabel("RAPID LINES")
-     .setColorBackground(color(80))
-     .setColorForeground(color(100))
-     .setColorActive(color(255))
-     .setColorCaptionLabel(color(255));
-  if (rapidLines) {
-    rapidLinesToggle.getCaptionLabel().setColor(color(80));
-  }
-  
-  rapidPatchToggle = cp5.addToggle("rapidPatchToggle")
+     .setColorBackground(offColor)
+     .setColorActive(onColor)
+     .setColorForeground(hoverColor)
+     .setColorCaptionLabel(rapidLines ? offColor : onColor);
+rapidLinesToggle.getCaptionLabel().align(ControlP5.CENTER, ControlP5.CENTER);
+
+//rapidPatchToggle
+rapidPatchToggle = cp5.addToggle("rapidPatchToggle")
      .setPosition(labelX + toggleWidth + spacing, toggleY)
      .setSize(toggleWidth, rowHeight)
      .setBroadcast(false)
      .setValue(rapidPatch ? 1 : 0)
      .setBroadcast(true)
      .setLabel("RAPID PATCH")
-     .setColorBackground(color(80))
-     .setColorForeground(color(100))
-     .setColorActive(color(255))
-     .setColorCaptionLabel(color(255));
-  if (rapidPatch) {
-    rapidPatchToggle.getCaptionLabel().setColor(color(80));
-  }
-  
-  rapidColourToggle = cp5.addToggle("rapidColourToggle")
+     .setColorBackground(offColor)
+     .setColorActive(onColor)
+     .setColorForeground(hoverColor)
+     .setColorCaptionLabel(rapidPatch ? offColor : onColor);
+rapidPatchToggle.getCaptionLabel().align(ControlP5.CENTER, ControlP5.CENTER);
+
+//rapidColourToggle
+rapidColourToggle = cp5.addToggle("rapidColourToggle")
      .setPosition(labelX + (toggleWidth + spacing) * 2, toggleY)
      .setSize(toggleWidth, rowHeight)
      .setBroadcast(false)
      .setValue(rapidColour ? 1 : 0)
      .setBroadcast(true)
      .setLabel("RAPID COLOUR")
-     .setColorBackground(color(80))
-     .setColorForeground(color(100))
-     .setColorActive(color(255))
-     .setColorCaptionLabel(color(255));
-  if (rapidColour) {
-    rapidColourToggle.getCaptionLabel().setColor(color(80));
-  }
-  
-  rapidAPIToggle = cp5.addToggle("rapidAPIToggle")
+     .setColorBackground(offColor)
+     .setColorActive(onColor)
+     .setColorForeground(hoverColor)
+     .setColorCaptionLabel(rapidColour ? offColor : onColor);
+rapidColourToggle.getCaptionLabel().align(ControlP5.CENTER, ControlP5.CENTER);
+
+//rapidAPIToggle
+rapidAPIToggle = cp5.addToggle("rapidAPIToggle")
      .setPosition(labelX + (toggleWidth + spacing) * 3, toggleY)
      .setSize(toggleWidth, rowHeight)
      .setBroadcast(false)
      .setValue(rapidAPI ? 1 : 0)
      .setBroadcast(true)
      .setLabel("RAPID API")
-     .setColorBackground(color(80))
-     .setColorForeground(color(100))
-     .setColorActive(color(255))
-     .setColorCaptionLabel(color(255));
-  if (rapidAPI) {
-    rapidAPIToggle.getCaptionLabel().setColor(color(80));
-  }
+     .setColorBackground(offColor)
+     .setColorActive(onColor)
+     .setColorForeground(hoverColor)
+     .setColorCaptionLabel(rapidAPI ? offColor : onColor);
+rapidAPIToggle.getCaptionLabel().align(ControlP5.CENTER, ControlP5.CENTER);
   
   int buttonWidth = 70;
   int rightX = width - (buttonWidth * 4 + spacing * 3);
@@ -419,13 +422,15 @@ void resetStatusMessage() {
 }
 
 // Toggle event handlers with text color inversion
+// REPLACE the existing toggle event handlers (lines ~326-356) with these:
+
 void rapidLinesToggle(boolean value) {
   resetStatusMessage();
   rapidLines = value;
   if (value) {
-    rapidLinesToggle.getCaptionLabel().setColor(color(80));  // Dark text when ON (white button)
+    rapidLinesToggle.setColorCaptionLabel(color(64));   // Dark text when ON (white button)
   } else {
-    rapidLinesToggle.getCaptionLabel().setColor(color(255)); // White text when OFF (dark button)
+    rapidLinesToggle.setColorCaptionLabel(color(255));  // White text when OFF (dark button)
   }
   println("Rapid Lines: " + (rapidLines ? "ON" : "OFF"));
 }
@@ -434,9 +439,9 @@ void rapidPatchToggle(boolean value) {
   resetStatusMessage();
   rapidPatch = value;
   if (value) {
-    rapidPatchToggle.getCaptionLabel().setColor(color(80));
+    rapidPatchToggle.setColorCaptionLabel(color(64));
   } else {
-    rapidPatchToggle.getCaptionLabel().setColor(color(255));
+    rapidPatchToggle.setColorCaptionLabel(color(255));
   }
   println("Rapid Patch: " + (rapidPatch ? "ON" : "OFF"));
 }
@@ -445,9 +450,9 @@ void rapidColourToggle(boolean value) {
   resetStatusMessage();
   rapidColour = value;
   if (value) {
-    rapidColourToggle.getCaptionLabel().setColor(color(80));
+    rapidColourToggle.setColorCaptionLabel(color(64));
   } else {
-    rapidColourToggle.getCaptionLabel().setColor(color(255));
+    rapidColourToggle.setColorCaptionLabel(color(255));
   }
   println("Rapid Colour: " + (rapidColour ? "ON" : "OFF"));
 }
@@ -456,9 +461,9 @@ void rapidAPIToggle(boolean value) {
   resetStatusMessage();
   rapidAPI = value;
   if (value) {
-    rapidAPIToggle.getCaptionLabel().setColor(color(80));
+    rapidAPIToggle.setColorCaptionLabel(color(64));
   } else {
-    rapidAPIToggle.getCaptionLabel().setColor(color(255));
+    rapidAPIToggle.setColorCaptionLabel(color(255));
   }
   println("Rapid API: " + (rapidAPI ? "ON" : "OFF"));
 }
@@ -1075,7 +1080,14 @@ void generateRapidVariant() {
 }
 
 void draw() {
-  background(CANVAS_WHITE);
+  // Draw dark gray background for the UI panel area (below the artwork)
+  fill(color(32));  // Very dark gray
+  noStroke();
+  rect(0, artHeight, width, uiPanelHeight);
+
+  // Now draw the white artwork background
+  fill(CANVAS_WHITE);
+  rect(0, 0, artWidth, artHeight);
   
   // RAPID GEN state machine
   if (rapidGenMode) {
