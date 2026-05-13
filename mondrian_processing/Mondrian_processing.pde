@@ -45,7 +45,7 @@
 //   - to override globals like dimensions
 //   - to override palette, specifying the config as "source" in written metadata
 
-String scriptVersion = "2.4.18";
+String scriptVersion = "2.4.21";
 String scriptName = "Mondrian_Processing";
 String paletteSource = "custom_mondrian";
 String lastAPIPaletteName = "";
@@ -59,18 +59,20 @@ import java.util.Calendar;
 boolean exportPNG = true;
 boolean exportSVG = true;
 
-// Layout settings - DYNAMIC GRID
-int artWidth = 1022;      // Width of the neo-or-postplastic artwork; an assumed "average" width from many surveyed works
-int artHeight = 1092;     // Height of the neo-or-postplastic artwork; an assumed "average" height from many surveyed works
+// Layout settings
+// An assumed "average" art width and height from surveying many Mondrian works is; 1022 x 1092: this hard-coded
+// proportionally scales down from that to 720px high:
+int artWidth = 842;
+int artHeight = 900;
 int gridSizeReference = 32;  // Reference grid size for the shorter dimension
 int uiPanelHeight = 135; // Height of the UI panel at bottom
 
 // Line weight configuration - PROPORTIONAL SCALING
 // Reference dimensions: max canvas width = 1022px
 // At 1022px width: min line weight = 6px, max line weight = 32px
-final float REFERENCE_WIDTH = 1022.0;
-final float REFERENCE_MIN_WEIGHT = 6.0;
-final float REFERENCE_MAX_WEIGHT = 32.0;
+final float REFERENCE_WIDTH = 1022;
+final float REFERENCE_MIN_WEIGHT = 6;
+final float REFERENCE_MAX_WEIGHT = 32;
 
 float currentLineWeight;  // Will be set randomly on each run
 float minLineDistance;    // Minimum distance between lines (currentLineWeight * 2)
