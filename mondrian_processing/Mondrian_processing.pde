@@ -7,46 +7,63 @@
 // ADDITIONAL FEATURES
 // Features have been added since that base port:
 // - update to dynamic grid system that keeps grid division (resultant cells) roughly (or exactly) square for any canvas aspect ratio
-// - implement color palette retrieval from a palette collection API: https://earthbound.io/data/random_ebPalette/ -- via button press
-//   - with color subset selection with color count text field (0 = all colors)
-// - add PNG and SVG export with full metadata (grammar, grid, palette name / URL)
-// - add line collision avoidance to prevent overlapping/clustered lines
-// - redesign UI with buttons for new features and better contrast
+// - implement color palette retrieval, via button press, from a palette collection API: https://earthbound.io/data/random_ebPalette/
+//   - with a text field for how many colors from the palette so use (subset, 0 = all colors, a number higher than available will
+//     auto-clamp to the total available)
+// - PNG and SVG export with full embedded (SVG) or txt sidecar (PNG) metadata of all creation paramaters (grammar, palette name etc.)
+// - line collision avoidance to prevent overlapping lines (lines may still cluster closely)
+// - redesign parameter UI with better contrast and for new features
 // - custom Mondrian palette with colors I reckon he used in his neoplastic paintings
 // - dynamic line weight scaling based on canvas width (proportional to 1022px reference)
-// - random line weight per sketch run (integer between scaled min/max)
-// - RAPID GEN mode: infinite generation of variants with auto-save (frame-based state machine, no background threading)
-// - RAPID GEN sub-modes: control whether lines, patches, colours, or API are shuffled (or called) per generation
+// - random line weight per sketch run between scaled minimum and maximum
+// - option to randomize line construction grammar
+// - RAPID GEN mode: infinite, rapid generation of variants (frame-based state machine, no background threading)
+//   - auto-save of variants to PNG and / or SVG controlle by global booleans that can be hacked (exportPNG, exportSVG)
+// - RAPID GEN sub-modes: control random lines, patches, colours, API retrieval from a collection, and grid grammar per variant
 //
 // DEPENDENCIES
 // Processing
 //
 // USAGE
-// Double click to open the sketch in the Processing IDE, or otherwise open it in anything else that can run processing.
-// Run the sketch. Click on the rule text box to edit rules (type A/B/C/D). Click on percent box to edit percentage.
-// Press ENTER to generate a new composition based on the rule string.
+// Double click to open the sketch in the Processing IDE, or otherwise open it in anything else that can run Processing.
+// Run the sketch. Click on the rule text box to edit line construction grammar (any combination of the letters A, B, C, and D,
+// repetition allowed). Edit other parameters in text areas to your wishes also.
+// Press ENTER in any field where you have edited the values to generate a new composition based on that rule.
 // Press S to save PNG and/or SVG (see booleans at top). Click PNG/SVG buttons to export (buttons override booleans).
-// Click "RAPID GEN" to enter generation mode (button toggles to STOP). In RAPID GEN mode, the sketch generates
-// and saves endless variations with the current grammar and color settings.
-// Use RAPID LINES, RAPID PATCH, RAPID COLOUR, and RAPID API to control which elements change per generation.
-// Click STOP (which the RAPID GEN button changes to when that mode is active) to halt generation.
+// Click "RAPID GEN" to enter generation mode. The text "RAPID GEN" on the button will change to "STOP." Press "STOP" to exit
+// RAPID GEN mode. In RAPID GEN mode, the sketch generates and saves endless variations with the current grammar etc. settings.
+// Use the RAPID LINES, RAPID PATCH, etc. buttons to control which elements change per generation. RAPID API retrieves
+// a new palette from an API and uses it with new variants.
 //
 // LICENSE
-// Creative Commons Share-Alike Attribution, by Richard Alexander Hall - 2026-05-12, ported from another developer,
+// Creative Commons Share-Alike Attribution, by Richard Alexander Hall, May 2026, ported from another developer,
 // as noted under DESCRIPTION.
 //
 //
 // CODE
 // TO DO
-// - museum mode; only display artwork area, fullscreen, no UI controls, getting a new palette in the background
+// - FIX THIS CRASH:
+// I ran it in rapidgen mode and encountered a crash:
+
+// --- RAPID GEN: Generating variant ---
+// GrammarGenerator: Selected grammar #254: AAAABBBBCCCCDDD
+// RAPID GRAMMAR: Generated: AAAABBBBCCCCDDD
+// RAPID GRAMMAR: Applying: AAAABBBBCCCCDDD
+// DEBUG: crv() called with rule = AAAABBBBCCCCDDD
+// --- RAPID GEN: Exports queued (will export in 3 frames) ---
+// IndexOutOfBoundsException: Index 15 out of bounds for length 15
+// IndexOutOfBoundsException: Index 15 out of bounds for length 15
+//
+// I hope it's easy to figure out the cause. I note that the generated grammar has 15 characters and the error is out of bounds for length 15.
+// - museum mode: only display artwork area, fullscreen, no UI controls, with RAPID API (new palettes) etc. active
 //   for every new render, then doing the render when ready.
-// - in museum mode, every 7th iteration use Mondrian palette as throwback?
+// - in museum mode, every 7th iteration use default Mondrian palette as throwback?
 // - CLI mode accepting a JSON config and dynamically patching settings
 //   - to start any mode thereby also?
 //   - to override globals like dimensions
 //   - to override palette, specifying the config as "source" in written metadata
 
-String scriptVersion = "2.7.16";
+String scriptVersion = "2.8.7";
 String scriptName = "Mondrian_Processing";
 String paletteSource = "custom_mondrian";
 String lastAPIPaletteName = "";
@@ -55,18 +72,6 @@ String lastAPIPaletteURL = "";
 import processing.svg.*;
 import java.util.Collections;
 import java.util.Calendar;
-import controlP5.*;
-
-// ControlP5 components
-ControlP5 cp5;
-Textfield ruleField;
-Textfield percentField;
-Textfield colorCountField;
-Toggle rapidLinesToggle;
-Toggle rapidPatchToggle;
-Toggle rapidColourToggle;
-Toggle rapidAPIToggle;
-Toggle rapidGrammarToggle;
 
 // Export settings
 boolean exportPNG = true;
@@ -205,7 +210,7 @@ void setup() {
   minLineDistance = currentLineWeight * 2; // Minimum pixels between line centers
   
   // Initialize ControlP5 UI FIRST so text fields exist for palette functions
-  setupControlP5();
+  setupUI();
   
   // Initialize with custom Mondrian palette (now safe - colorCountField exists)
   initCustomMondrianPalette();
@@ -217,10 +222,9 @@ void setup() {
   patch();
   colour();
 
-  // CRITICAL FIX: Force nearest-neighbor sampling
-  // This completely disables anti-aliasing for
-  // all geometry, which was causing inconsistent
-  // line (black box) width appearance:
+  // Force nearest-neighbor sampling, which disables anti-aliasing
+  // for all geometry, which would cause inconsistent line (black box)
+  // width appearance:
   ((PGraphicsOpenGL)g).textureSampling(2);
   
   println("Line weight: " + currentLineWeight + "px (scaled from " + artWidth + "px width)");
@@ -228,176 +232,7 @@ void setup() {
   println("Using custom Mondrian palette with " + fullPalette.length + " colors (white reserved for canvas)");
 }
 
-void setupControlP5() {
-  cp5 = new ControlP5(this);
-  
-  cp5.setColorBackground(color(30));
-  cp5.setColorForeground(color(100));
-  cp5.setColorActive(color(120));
-  
-  int uiY = artHeight;
-  int fieldWidth = 120;
-  int smallFieldWidth = 60;
-  int spacing = 10;
-  int rowHeight = 25;
-  int labelX = 20;
-  int fieldY = uiY + 10;
-  
-  ruleField = cp5.addTextfield("ruleField")
-     .setPosition(labelX, fieldY)
-     .setSize(fieldWidth, rowHeight)
-     .setText(rule)
-     .setLabel("Rule String")
-     .setAutoClear(false)
-     .setColorCaptionLabel(color(255));
-
-  percentField = cp5.addTextfield("percentField")
-     .setPosition(labelX + fieldWidth + spacing, fieldY)
-     .setSize(smallFieldWidth, rowHeight)
-     .setText(str(int(keep * 100)))
-     .setLabel("Fill %")
-     .setAutoClear(false)
-     .setColorCaptionLabel(color(255));
-
-  colorCountField = cp5.addTextfield("colorCountField")
-     .setPosition(labelX + fieldWidth + spacing + smallFieldWidth + spacing, fieldY)
-     .setSize(smallFieldWidth, rowHeight)
-     .setText("7")
-     .setLabel("Colors (0=all)")
-     .setAutoClear(false)
-     .setColorCaptionLabel(color(255));
-
-  int toggleY = fieldY + rowHeight + 15;
-  int toggleWidth = 70;
-  
-  // Common styling for all five toggles
-  color offColor = color(64);     // Dark gray when OFF
-  color onColor = color(255);     // White when ON
-  color hoverColor = color(100);  // Medium gray on hover
-  
-  //rapidLinesToggle
-  rapidLinesToggle = cp5.addToggle("rapidLinesToggle")
-     .setPosition(labelX, toggleY)
-     .setSize(toggleWidth, rowHeight)
-     .setBroadcast(false)
-     .setValue(rapidLines ? 1 : 0)
-     .setBroadcast(true)
-     .setLabel("LINES")
-     .setColorBackground(offColor)
-     .setColorActive(onColor)
-     .setColorForeground(hoverColor)
-     .setColorCaptionLabel(rapidLines ? offColor : onColor);
-  rapidLinesToggle.getCaptionLabel().align(ControlP5.CENTER, ControlP5.CENTER);
-  
-  //rapidPatchToggle
-  rapidPatchToggle = cp5.addToggle("rapidPatchToggle")
-     .setPosition(labelX + (toggleWidth + spacing), toggleY)
-     .setSize(toggleWidth, rowHeight)
-     .setBroadcast(false)
-     .setValue(rapidPatch ? 1 : 0)
-     .setBroadcast(true)
-     .setLabel("PATCH")
-     .setColorBackground(offColor)
-     .setColorActive(onColor)
-     .setColorForeground(hoverColor)
-     .setColorCaptionLabel(rapidPatch ? offColor : onColor);
-  rapidPatchToggle.getCaptionLabel().align(ControlP5.CENTER, ControlP5.CENTER);
-  
-  //rapidColourToggle
-  rapidColourToggle = cp5.addToggle("rapidColourToggle")
-     .setPosition(labelX + (toggleWidth + spacing) * 2, toggleY)
-     .setSize(toggleWidth, rowHeight)
-     .setBroadcast(false)
-     .setValue(rapidColour ? 1 : 0)
-     .setBroadcast(true)
-     .setLabel("COLOUR")
-     .setColorBackground(offColor)
-     .setColorActive(onColor)
-     .setColorForeground(hoverColor)
-     .setColorCaptionLabel(rapidColour ? offColor : onColor);
-  rapidColourToggle.getCaptionLabel().align(ControlP5.CENTER, ControlP5.CENTER);
-  
-  //rapidAPIToggle
-  rapidAPIToggle = cp5.addToggle("rapidAPIToggle")
-     .setPosition(labelX + (toggleWidth + spacing) * 3, toggleY)
-     .setSize(toggleWidth, rowHeight)
-     .setBroadcast(false)
-     .setValue(rapidAPI ? 1 : 0)
-     .setBroadcast(true)
-     .setLabel("API")
-     .setColorBackground(offColor)
-     .setColorActive(onColor)
-     .setColorForeground(hoverColor)
-     .setColorCaptionLabel(rapidAPI ? offColor : onColor);
-  rapidAPIToggle.getCaptionLabel().align(ControlP5.CENTER, ControlP5.CENTER);
-  
-  //rapidGrammarToggle (5th button)
-  rapidGrammarToggle = cp5.addToggle("rapidGrammarToggle")
-     .setPosition(labelX + (toggleWidth + spacing) * 4, toggleY)
-     .setSize(toggleWidth, rowHeight)
-     .setBroadcast(false)
-     .setValue(rapidGrammar ? 1 : 0)
-     .setBroadcast(true)
-     .setLabel("GRAMMAR")
-     .setColorBackground(offColor)
-     .setColorActive(onColor)
-     .setColorForeground(hoverColor)
-     .setColorCaptionLabel(rapidGrammar ? offColor : onColor);
-  rapidGrammarToggle.getCaptionLabel().align(ControlP5.CENTER, ControlP5.CENTER);
-
-  int buttonWidth = 70;
-  int rightX = width - (buttonWidth * 4 + spacing * 3);
-  
-  cp5.addButton("resetAll")
-     .setPosition(rightX, fieldY)
-     .setSize(buttonWidth, rowHeight)
-     .setLabel("RESET ALL")
-     .setColorCaptionLabel(color(255));
-  
-  cp5.addButton("shuffleLines")
-     .setPosition(rightX + buttonWidth + spacing, fieldY)
-     .setSize(buttonWidth, rowHeight)
-     .setLabel("SHUFFLE LINES")
-     .setColorCaptionLabel(color(255));
-  
-  cp5.addButton("shufflePatch")
-     .setPosition(rightX + (buttonWidth + spacing) * 2, fieldY)
-     .setSize(buttonWidth, rowHeight)
-     .setLabel("SHUFFLE PATCH")
-     .setColorCaptionLabel(color(255));
-  
-  cp5.addButton("shuffleColour")
-     .setPosition(rightX + (buttonWidth + spacing) * 3, fieldY)
-     .setSize(buttonWidth, rowHeight)
-     .setLabel("SHUFFLE COLOUR")
-     .setColorCaptionLabel(color(255));
-  
-  int secondRowY = fieldY + rowHeight + spacing;
-  
-  cp5.addButton("rapidGenToggle")
-     .setPosition(rightX, secondRowY)
-     .setSize(buttonWidth, rowHeight)
-     .setLabel("RAPID GEN")
-     .setColorCaptionLabel(color(255));
-  
-  cp5.addButton("apiColors")
-     .setPosition(rightX + buttonWidth + spacing, secondRowY)
-     .setSize(buttonWidth, rowHeight)
-     .setLabel("API COLORS")
-     .setColorCaptionLabel(color(255));
-  
-  cp5.addButton("exportPNGButton")
-     .setPosition(rightX + (buttonWidth + spacing) * 2, secondRowY)
-     .setSize(buttonWidth, rowHeight)
-     .setLabel("EXPORT PNG")
-     .setColorCaptionLabel(color(255));
-  
-  cp5.addButton("exportSVGButton")
-     .setPosition(rightX + (buttonWidth + spacing) * 3, secondRowY)
-     .setSize(buttonWidth, rowHeight)
-     .setLabel("EXPORT SVG")
-     .setColorCaptionLabel(color(255));
-}
+// The setupUI() function could be here but it is in UI_Controls.pde in the same folder, auto-imported by Processing.
 
 void ruleField(String value) {
   // Filter to only A,B,C,D
