@@ -66,6 +66,7 @@ Toggle rapidLinesToggle;
 Toggle rapidPatchToggle;
 Toggle rapidColourToggle;
 Toggle rapidAPIToggle;
+Toggle rapidGrammarToggle;
 
 // Export settings
 boolean exportPNG = true;
@@ -96,6 +97,8 @@ int gridSizeX;           // Number of horizontal divisions
 int gridSizeY;           // Number of vertical divisions
 
 String rule = "AABBCCDDDDDD";
+// see comments at grammarGenerator initialization and in GrammarGenerator.pde:
+int maxLetterRepetitionForGrammarGenerator = 4;
 float keep = 0.5;
 
 // RAPID GEN mode - frame-based state machine (no background thread)
@@ -109,6 +112,7 @@ boolean rapidLines = true;    // Shuffle lines with every new variant (default O
 boolean rapidPatch = true;    // Shuffle patches with every new variant (default ON)
 boolean rapidColour = true;   // Shuffle colours with every new variant (default ON)
 boolean rapidAPI = false;     // Fetch new palette for every variant (default OFF)
+boolean rapidGrammar = false;  // Randomize grammar (types and combinations of lines) for every variant (default OFF)
 boolean pendingAPICall = false;
 int apiCallStartTime = 0;
 boolean newPaletteReady = false;
@@ -120,6 +124,9 @@ boolean pendingExportSVG = false;
 
 String statusMessage = "";
 int statusMessageTimer = 0;
+
+// We can do this because of the tab or import of the code file GrammarGenerator.pde, in the same directory:
+GrammarGenerator grammarGenerator;
 
 // CUSTOM MONDRIAN PALETTE (inspired by color analysis of original works)
 // NOTE: #f6f6f6 (white) is EXCLUDED from this palette - it's reserved for canvas background only!
@@ -182,6 +189,12 @@ void settings() {
 void setup() {
   surface.setTitle(scriptName + " v" + scriptVersion);
   
+  // Initialize grammar generator; can pass any integer but counts will explode at higher numbers;
+  // Generates grammars like A...B...C...D... with configurable max per letter; passing it 4 will
+  // allow up to 4 repetition of A, B, C or D:
+  grammarGenerator = new GrammarGenerator(maxLetterRepetitionForGrammarGenerator);
+  println("Grammar generator ready with " + grammarGenerator.getTotalCount() + " grammars");
+
   // Calculate line weight based on current canvas width
   calculateLineWeight();
   
@@ -199,7 +212,7 @@ void setup() {
   
   // Update the color count field with actual palette size
   colorCountField.setText(str(fullPalette.length));
-  
+
   crv();
   patch();
   colour();
@@ -253,73 +266,85 @@ void setupControlP5() {
      .setLabel("Colors (0=all)")
      .setAutoClear(false)
      .setColorCaptionLabel(color(255));
-  
-// REPLACE the existing toggle setup section (from line ~219 to ~252) with this:
 
   int toggleY = fieldY + rowHeight + 15;
   int toggleWidth = 70;
   
-  // Common styling for all four toggles
+  // Common styling for all five toggles
   color offColor = color(64);     // Dark gray when OFF
   color onColor = color(255);     // White when ON
   color hoverColor = color(100);  // Medium gray on hover
   
-//rapidLinesToggle
-rapidLinesToggle = cp5.addToggle("rapidLinesToggle")
+  //rapidLinesToggle
+  rapidLinesToggle = cp5.addToggle("rapidLinesToggle")
      .setPosition(labelX, toggleY)
      .setSize(toggleWidth, rowHeight)
      .setBroadcast(false)
      .setValue(rapidLines ? 1 : 0)
      .setBroadcast(true)
-     .setLabel("RAPID LINES")
+     .setLabel("LINES")
      .setColorBackground(offColor)
      .setColorActive(onColor)
      .setColorForeground(hoverColor)
      .setColorCaptionLabel(rapidLines ? offColor : onColor);
-rapidLinesToggle.getCaptionLabel().align(ControlP5.CENTER, ControlP5.CENTER);
-
-//rapidPatchToggle
-rapidPatchToggle = cp5.addToggle("rapidPatchToggle")
-     .setPosition(labelX + toggleWidth + spacing, toggleY)
+  rapidLinesToggle.getCaptionLabel().align(ControlP5.CENTER, ControlP5.CENTER);
+  
+  //rapidPatchToggle
+  rapidPatchToggle = cp5.addToggle("rapidPatchToggle")
+     .setPosition(labelX + (toggleWidth + spacing), toggleY)
      .setSize(toggleWidth, rowHeight)
      .setBroadcast(false)
      .setValue(rapidPatch ? 1 : 0)
      .setBroadcast(true)
-     .setLabel("RAPID PATCH")
+     .setLabel("PATCH")
      .setColorBackground(offColor)
      .setColorActive(onColor)
      .setColorForeground(hoverColor)
      .setColorCaptionLabel(rapidPatch ? offColor : onColor);
-rapidPatchToggle.getCaptionLabel().align(ControlP5.CENTER, ControlP5.CENTER);
-
-//rapidColourToggle
-rapidColourToggle = cp5.addToggle("rapidColourToggle")
+  rapidPatchToggle.getCaptionLabel().align(ControlP5.CENTER, ControlP5.CENTER);
+  
+  //rapidColourToggle
+  rapidColourToggle = cp5.addToggle("rapidColourToggle")
      .setPosition(labelX + (toggleWidth + spacing) * 2, toggleY)
      .setSize(toggleWidth, rowHeight)
      .setBroadcast(false)
      .setValue(rapidColour ? 1 : 0)
      .setBroadcast(true)
-     .setLabel("RAPID COLOUR")
+     .setLabel("COLOUR")
      .setColorBackground(offColor)
      .setColorActive(onColor)
      .setColorForeground(hoverColor)
      .setColorCaptionLabel(rapidColour ? offColor : onColor);
-rapidColourToggle.getCaptionLabel().align(ControlP5.CENTER, ControlP5.CENTER);
-
-//rapidAPIToggle
-rapidAPIToggle = cp5.addToggle("rapidAPIToggle")
+  rapidColourToggle.getCaptionLabel().align(ControlP5.CENTER, ControlP5.CENTER);
+  
+  //rapidAPIToggle
+  rapidAPIToggle = cp5.addToggle("rapidAPIToggle")
      .setPosition(labelX + (toggleWidth + spacing) * 3, toggleY)
      .setSize(toggleWidth, rowHeight)
      .setBroadcast(false)
      .setValue(rapidAPI ? 1 : 0)
      .setBroadcast(true)
-     .setLabel("RAPID API")
+     .setLabel("API")
      .setColorBackground(offColor)
      .setColorActive(onColor)
      .setColorForeground(hoverColor)
      .setColorCaptionLabel(rapidAPI ? offColor : onColor);
-rapidAPIToggle.getCaptionLabel().align(ControlP5.CENTER, ControlP5.CENTER);
+  rapidAPIToggle.getCaptionLabel().align(ControlP5.CENTER, ControlP5.CENTER);
   
+  //rapidGrammarToggle (5th button)
+  rapidGrammarToggle = cp5.addToggle("rapidGrammarToggle")
+     .setPosition(labelX + (toggleWidth + spacing) * 4, toggleY)
+     .setSize(toggleWidth, rowHeight)
+     .setBroadcast(false)
+     .setValue(rapidGrammar ? 1 : 0)
+     .setBroadcast(true)
+     .setLabel("GRAMMAR")
+     .setColorBackground(offColor)
+     .setColorActive(onColor)
+     .setColorForeground(hoverColor)
+     .setColorCaptionLabel(rapidGrammar ? offColor : onColor);
+  rapidGrammarToggle.getCaptionLabel().align(ControlP5.CENTER, ControlP5.CENTER);
+
   int buttonWidth = 70;
   int rightX = width - (buttonWidth * 4 + spacing * 3);
   
@@ -457,18 +482,6 @@ void rapidColourToggle(boolean value) {
   println("Rapid Colour: " + (rapidColour ? "ON" : "OFF"));
 }
 
-void rapidAPIToggle(boolean value) {
-  resetStatusMessage();
-  rapidAPI = value;
-  if (value) {
-    rapidAPIToggle.setColorCaptionLabel(color(64));
-  } else {
-    rapidAPIToggle.setColorCaptionLabel(color(255));
-  }
-  println("Rapid API: " + (rapidAPI ? "ON" : "OFF"));
-}
-
-// Button event handlers
 void resetAll() {
   resetStatusMessage();
   if (rapidGenMode) stopRapidGenMode();
@@ -483,6 +496,29 @@ void resetAll() {
   colour();
 }
 
+void rapidAPIToggle(boolean value) {
+  resetStatusMessage();
+  rapidAPI = value;
+  if (value) {
+    rapidAPIToggle.setColorCaptionLabel(color(64));
+  } else {
+    rapidAPIToggle.setColorCaptionLabel(color(255));
+  }
+  println("Rapid API: " + (rapidAPI ? "ON" : "OFF"));
+}
+
+void rapidGrammarToggle(boolean value) {
+  resetStatusMessage();
+  rapidGrammar = value;
+  if (value) {
+    rapidGrammarToggle.setColorCaptionLabel(color(64));
+  } else {
+    rapidGrammarToggle.setColorCaptionLabel(color(255));
+  }
+  println("Rapid Grammar: " + (rapidGrammar ? "ON" : "OFF"));
+}
+
+// Button event handlers
 void shuffleLines() {
   resetStatusMessage();
   if (!rapidGenMode) {
@@ -704,6 +740,8 @@ void fetchColorsFromAPI() {
 }
 
 void crv() {
+  println("DEBUG: crv() called with rule = " + rule);
+
   // Re-randomize line weight for this new composition
   calculateLineWeight();
   minLineDistance = currentLineWeight * 2;
@@ -1026,9 +1064,10 @@ boolean startRapidGenMode() {
   if (rapidGenMode) return false;
   
   // Check if at least one sub-mode is active
-  if (!rapidLines && !rapidPatch && !rapidColour && !rapidAPI) {
+  if (!rapidLines && !rapidPatch && !rapidColour && !rapidAPI && !rapidGrammar) {
     println("ERROR: Cannot start RAPID GEN mode - no sub-modes are active!");
     println("  Enable at least one of: Rapid Lines, Rapid Patch, Rapid Colour, or Rapid API");
+    println("  Rapid Grammar: " + (rapidGrammar ? "ON" : "OFF"));
     statusMessage = "ERROR: Enable at least one RAPID mode (Lines, Patch, Colour, or API)";
     statusMessageTimer = 180;
     return false;
@@ -1043,6 +1082,7 @@ boolean startRapidGenMode() {
   println("  Rapid Patch: " + (rapidPatch ? "ON" : "OFF"));
   println("  Rapid Colour: " + (rapidColour ? "ON" : "OFF"));
   println("  Rapid API: " + (rapidAPI ? "ON" : "OFF"));
+  println("  Rapid Grammar: " + (rapidGrammar ? "ON" : "OFF"));
   return true;
 }
 
@@ -1057,10 +1097,27 @@ void stopRapidGenMode() {
 }
 
 void generateRapidVariant() {
-  // Perform operations based on rapid mode flags
   boolean linesChanged = false;
   
-  if (rapidLines) {
+  // Randomize grammar if rapidGrammar is on
+  if (rapidGrammar) {
+    String newGrammar = grammarGenerator.getRandomGrammar();
+    println("RAPID GRAMMAR: Generated: " + newGrammar);  // Print to stdout
+    
+    if (!newGrammar.equals(rule)) {
+      rule = newGrammar;
+      println("RAPID GRAMMAR: Applying: " + rule);  // Print to stdout
+      
+      // Update the text field display (like API does)
+      ruleField.setText(rule);
+      // Force the text field to redraw
+      ruleField.setColorBackground(color(64));
+      
+      linesChanged = true;
+    }
+  }
+  
+  if (rapidLines || linesChanged) {
     crv();  // Generates new line configuration and random line weight
     linesChanged = true;
   }
