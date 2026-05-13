@@ -46,7 +46,7 @@
 //   - to override globals like dimensions
 //   - to override palette, specifying the config as "source" in written metadata
 
-String scriptVersion = "2.5.0";
+String scriptVersion = "2.6.14";
 String scriptName = "Mondrian_Processing";
 String paletteSource = "custom_mondrian";
 String lastAPIPaletteName = "";
@@ -117,6 +117,9 @@ final int API_TIMEOUT_MS = 12000;  // 12 seconds timeout
 // Export flags for frame-synchronized capture
 boolean pendingExportPNG = false;
 boolean pendingExportSVG = false;
+
+String statusMessage = "";
+int statusMessageTimer = 0;
 
 // CUSTOM MONDRIAN PALETTE (inspired by color analysis of original works)
 // NOTE: #f6f6f6 (white) is EXCLUDED from this palette - it's reserved for canvas background only!
@@ -215,7 +218,6 @@ void setup() {
 void setupControlP5() {
   cp5 = new ControlP5(this);
   
-  // Set global default style for all controllers
   cp5.setColorBackground(color(80));
   cp5.setColorForeground(color(100));
   cp5.setColorActive(color(120));
@@ -228,16 +230,14 @@ void setupControlP5() {
   int labelX = 20;
   int fieldY = uiY + 10;
   
-  // Text Field: Rule String
   ruleField = cp5.addTextfield("ruleField")
      .setPosition(labelX, fieldY)
      .setSize(fieldWidth, rowHeight)
      .setText(rule)
      .setLabel("Rule String")
      .setAutoClear(false)
-     .setColorCaptionLabel(color(255)); // White text for label
+     .setColorCaptionLabel(color(255));
 
-  // Text Field: Fill %
   percentField = cp5.addTextfield("percentField")
      .setPosition(labelX + fieldWidth + spacing, fieldY)
      .setSize(smallFieldWidth, rowHeight)
@@ -246,7 +246,6 @@ void setupControlP5() {
      .setAutoClear(false)
      .setColorCaptionLabel(color(255));
 
-  // Text Field: Colors (placeholder)
   colorCountField = cp5.addTextfield("colorCountField")
      .setPosition(labelX + fieldWidth + spacing + smallFieldWidth + spacing, fieldY)
      .setSize(smallFieldWidth, rowHeight)
@@ -255,51 +254,69 @@ void setupControlP5() {
      .setAutoClear(false)
      .setColorCaptionLabel(color(255));
   
-  // Rapid Mode Toggles (Second Row)
   int toggleY = fieldY + rowHeight + 15;
   int toggleWidth = 70;
   
   rapidLinesToggle = cp5.addToggle("rapidLinesToggle")
      .setPosition(labelX, toggleY)
      .setSize(toggleWidth, rowHeight)
+     .setBroadcast(false)
      .setValue(rapidLines ? 1 : 0)
+     .setBroadcast(true)
      .setLabel("RAPID LINES")
      .setColorBackground(color(80))
      .setColorForeground(color(100))
      .setColorActive(color(255))
      .setColorCaptionLabel(color(255));
+  if (rapidLines) {
+    rapidLinesToggle.getCaptionLabel().setColor(color(80));
+  }
   
   rapidPatchToggle = cp5.addToggle("rapidPatchToggle")
      .setPosition(labelX + toggleWidth + spacing, toggleY)
      .setSize(toggleWidth, rowHeight)
+     .setBroadcast(false)
      .setValue(rapidPatch ? 1 : 0)
+     .setBroadcast(true)
      .setLabel("RAPID PATCH")
      .setColorBackground(color(80))
      .setColorForeground(color(100))
      .setColorActive(color(255))
      .setColorCaptionLabel(color(255));
+  if (rapidPatch) {
+    rapidPatchToggle.getCaptionLabel().setColor(color(80));
+  }
   
   rapidColourToggle = cp5.addToggle("rapidColourToggle")
      .setPosition(labelX + (toggleWidth + spacing) * 2, toggleY)
      .setSize(toggleWidth, rowHeight)
+     .setBroadcast(false)
      .setValue(rapidColour ? 1 : 0)
+     .setBroadcast(true)
      .setLabel("RAPID COLOUR")
      .setColorBackground(color(80))
      .setColorForeground(color(100))
      .setColorActive(color(255))
      .setColorCaptionLabel(color(255));
+  if (rapidColour) {
+    rapidColourToggle.getCaptionLabel().setColor(color(80));
+  }
   
   rapidAPIToggle = cp5.addToggle("rapidAPIToggle")
      .setPosition(labelX + (toggleWidth + spacing) * 3, toggleY)
      .setSize(toggleWidth, rowHeight)
+     .setBroadcast(false)
      .setValue(rapidAPI ? 1 : 0)
+     .setBroadcast(true)
      .setLabel("RAPID API")
      .setColorBackground(color(80))
      .setColorForeground(color(100))
      .setColorActive(color(255))
      .setColorCaptionLabel(color(255));
+  if (rapidAPI) {
+    rapidAPIToggle.getCaptionLabel().setColor(color(80));
+  }
   
-  // Main Control Buttons (Right Side)
   int buttonWidth = 70;
   int rightX = width - (buttonWidth * 4 + spacing * 3);
   
@@ -327,7 +344,6 @@ void setupControlP5() {
      .setLabel("SHUFFLE COLOUR")
      .setColorCaptionLabel(color(255));
   
-  // Second Row Buttons (Export, Mode)
   int secondRowY = fieldY + rowHeight + spacing;
   
   cp5.addButton("rapidGenToggle")
@@ -396,29 +412,60 @@ void colorCountField(String value) {
   }
 }
 
-// Toggle event handlers
+// Reset status message
+void resetStatusMessage() {
+  statusMessage = "";
+  statusMessageTimer = 0;
+}
+
+// Toggle event handlers with text color inversion
 void rapidLinesToggle(boolean value) {
+  resetStatusMessage();
   rapidLines = value;
+  if (value) {
+    rapidLinesToggle.getCaptionLabel().setColor(color(80));  // Dark text when ON (white button)
+  } else {
+    rapidLinesToggle.getCaptionLabel().setColor(color(255)); // White text when OFF (dark button)
+  }
   println("Rapid Lines: " + (rapidLines ? "ON" : "OFF"));
 }
 
 void rapidPatchToggle(boolean value) {
+  resetStatusMessage();
   rapidPatch = value;
+  if (value) {
+    rapidPatchToggle.getCaptionLabel().setColor(color(80));
+  } else {
+    rapidPatchToggle.getCaptionLabel().setColor(color(255));
+  }
   println("Rapid Patch: " + (rapidPatch ? "ON" : "OFF"));
 }
 
 void rapidColourToggle(boolean value) {
+  resetStatusMessage();
   rapidColour = value;
+  if (value) {
+    rapidColourToggle.getCaptionLabel().setColor(color(80));
+  } else {
+    rapidColourToggle.getCaptionLabel().setColor(color(255));
+  }
   println("Rapid Colour: " + (rapidColour ? "ON" : "OFF"));
 }
 
 void rapidAPIToggle(boolean value) {
+  resetStatusMessage();
   rapidAPI = value;
+  if (value) {
+    rapidAPIToggle.getCaptionLabel().setColor(color(80));
+  } else {
+    rapidAPIToggle.getCaptionLabel().setColor(color(255));
+  }
   println("Rapid API: " + (rapidAPI ? "ON" : "OFF"));
 }
 
 // Button event handlers
 void resetAll() {
+  resetStatusMessage();
   if (rapidGenMode) stopRapidGenMode();
   rule = "AABBCCDDDDDD";
   ruleField.setText(rule);
@@ -432,6 +479,7 @@ void resetAll() {
 }
 
 void shuffleLines() {
+  resetStatusMessage();
   if (!rapidGenMode) {
     crv();
     patch();
@@ -441,6 +489,7 @@ void shuffleLines() {
 }
 
 void shufflePatch() {
+  resetStatusMessage();
   if (!rapidGenMode) {
     patch();
   } else {
@@ -449,6 +498,7 @@ void shufflePatch() {
 }
 
 void shuffleColour() {
+  resetStatusMessage();
   if (!rapidGenMode) {
     colour();
   } else {
@@ -457,24 +507,31 @@ void shuffleColour() {
 }
 
 void rapidGenToggle() {
+  resetStatusMessage();
   if (rapidGenMode) {
     stopRapidGenMode();
     cp5.get(Button.class, "rapidGenToggle").setLabel("RAPID GEN");
   } else {
-    startRapidGenMode();
-    cp5.get(Button.class, "rapidGenToggle").setLabel("STOP");
+    boolean started = startRapidGenMode();
+    if (started) {
+      cp5.get(Button.class, "rapidGenToggle").setLabel("STOP");
+    }
+    // If start failed, button label stays "RAPID GEN"
   }
 }
 
 void apiColors() {
+  resetStatusMessage();
   fetchColorsFromAPI();
 }
 
 void exportPNGButton() {
+  resetStatusMessage();
   exportToPNG();
 }
 
 void exportSVGButton() {
+  resetStatusMessage();
   exportToSVG();
 }
 
@@ -620,8 +677,11 @@ void fetchColorsFromAPI() {
           fullPalette[i] = newPalette[i];
         }
         paletteSource = "api";
-        updateActivePalette();
         
+        // Update the color count field to show the full palette size
+        colorCountField.setText(str(fullPalette.length));
+        // and use the palette (including that fields' potentially changed number from the palette color count)
+        updateActivePalette();
         // Signal that new palette is ready
         newPaletteReady = true;
         
@@ -957,8 +1017,18 @@ void drawArtwork() {
   }
 }
 
-void startRapidGenMode() {
-  if (rapidGenMode) return;
+boolean startRapidGenMode() {
+  if (rapidGenMode) return false;
+  
+  // Check if at least one sub-mode is active
+  if (!rapidLines && !rapidPatch && !rapidColour && !rapidAPI) {
+    println("ERROR: Cannot start RAPID GEN mode - no sub-modes are active!");
+    println("  Enable at least one of: Rapid Lines, Rapid Patch, Rapid Colour, or Rapid API");
+    statusMessage = "ERROR: Enable at least one RAPID mode (Lines, Patch, Colour, or API)";
+    statusMessageTimer = 180;
+    return false;
+  }
+  
   rapidGenMode = true;
   rapidGenGenerating = false;
   rapidGenExportDelay = 0;
@@ -968,6 +1038,7 @@ void startRapidGenMode() {
   println("  Rapid Patch: " + (rapidPatch ? "ON" : "OFF"));
   println("  Rapid Colour: " + (rapidColour ? "ON" : "OFF"));
   println("  Rapid API: " + (rapidAPI ? "ON" : "OFF"));
+  return true;
 }
 
 void stopRapidGenMode() {
@@ -982,12 +1053,17 @@ void stopRapidGenMode() {
 
 void generateRapidVariant() {
   // Perform operations based on rapid mode flags
+  boolean linesChanged = false;
+  
   if (rapidLines) {
     crv();  // Generates new line configuration and random line weight
+    linesChanged = true;
   }
-  // If rapidLines is OFF, we don't change lines or line weight
   
-  if (rapidPatch) {
+  // If lines changed, we MUST also run patch() to update patch geometry,
+  // regardless of rapidPatch setting. Otherwise patches from old grid
+  // will be drawn on new grid lines.
+  if (rapidPatch || linesChanged) {
     patch();  // Shuffle which patches are colored
   }
   
@@ -1071,6 +1147,18 @@ void draw() {
   if (rapidGenMode) status += " | RAPID GEN ACTIVE";
   if (rapidAPI && pendingAPICall) status += " | Waiting for API...";
   text(status, 20, height - 10);
+  
+  // Draw error/status message if present
+  if (statusMessageTimer > 0 && statusMessage.length() > 0) {
+    fill(255, 100, 100);
+    textSize(10);
+    textAlign(LEFT, CENTER);
+    text(statusMessage, 20, height - 25);
+    statusMessageTimer--;
+    if (statusMessageTimer <= 0) {
+      statusMessage = "";
+    }
+  }
   
   if (pendingExportPNG) {
     exportToPNG();

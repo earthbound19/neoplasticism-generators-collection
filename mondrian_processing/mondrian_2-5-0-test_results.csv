@@ -1,0 +1,17 @@
+State_ID,rapidLines,rapidPatch,rapidColour,rapidAPI,Expected_Result_per_generated_variant,Actual_Result_per_generated_variant,png save?,svg save?,status
+0,0,0,0,0,rapid gen mode is NOT activated; and feedback is given to user in terminal and UI area: nothing will happen. Toggle at least on sub-mode on.,infinite repeat saves of the same variant with no interesting changes,y,y,fail
+1,0,0,0,1,only the palette and color fill changes on return from API call,as expected,y,y,pass
+2,0,0,1,0,only rapid color fill changes on selected patches,as expected,y,y,pass
+3,0,0,1,1,only colors in defined patches change,as expected,y,y,pass
+4,0,1,0,0,only patch changes per variant; which means also intrinsic seeming (?) random color fill changes,as expected,y,y,pass
+5,0,1,0,1,patch changes per variant; which means also intrinsic seeming (?) random color fill changes; AND when API returns a new palette; it is applied immediately and colors change per newly retrieved palette,as expected,y,y,pass
+6,0,1,1,0,patch and color changes per variant,as expected,y,y,pass
+7,0,1,1,1,patch and color changes per variant; AND color changes per newly retrieved palette from API when it returns,as expected,y,y,pass
+8,1,0,0,0,lines change per variant; and forced patch and color rnd changes with them from existing color; in this mode we want to force patch change per variant to keep up with line change per variant (otherwise misaligned static patches result),lines change per variant over previous background static incongrous patch and color state; color fills don't match lines,y,y,fail
+9,1,0,0,1,lines change per variant; and forced patch and color rnd changes with them from existing color; in this mode we want to force patch change per variant to keep up with line change per variant (otherwise misaligned static patches result) - also color changes when API returns a new palette,lines change per variant over previous background static incongrous patch and color state; color fills don't match lines. Color changes when API returns new palette; as expected,y,y,fail
+10,1,0,1,0,lines change per variant; and forced patch and color rnd changes with them from existing color; in this mode we want to force patch change per variant to keep up with line change per variant (otherwise misaligned static patches result),lines change per variant over previous background static incongrous patch and color state; color fills don't match lines. Rnd color fills as expected; just in this wrong incongrous state,y,y,fail
+11,1,0,1,1,lines change per variant; and forced patch and color rnd changes with them from existing color; in this mode we want to force patch change per variant to keep up with line change per variant (otherwise misaligned static patches result) - also color changes when API returns a new palette,lines change per variant over previous background static incongrous patch and color state; color fills don't match lines. Rnd color fills as expected; just in this wrong incongrous state - also color changes on API return of new palette as expected,y,y,fail
+12,1,1,0,0,imma not detail :),as expected,y,y,pass
+13,1,1,0,1,imma not detail :),as expected,y,y,pass
+14,1,1,1,0,imma not detail :),as expected,y,y,pass
+15,1,1,1,1,imma not detail :),as expected,y,y,pass
