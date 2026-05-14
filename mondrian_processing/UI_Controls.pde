@@ -47,7 +47,7 @@ void setupUI() {
   percentField = cp5.addTextfield("percentField")
      .setPosition(labelX + fieldWidth + spacing, fieldY)
      .setSize(smallFieldWidth, rowHeight)
-     .setText(str(int(keep * 100)))
+     .setText(str(int(percentToPatch * 100)))
      .setLabel("Fill %")
      .setAutoClear(false)
      .setColorCaptionLabel(color(255));

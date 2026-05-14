@@ -22,7 +22,9 @@
 // - RAPID GEN sub-modes: control random lines, patches, colours, API retrieval from a collection, and grid grammar per variant
 //
 // DEPENDENCIES
-// Processing
+// Processing (possibly only v4 or higher), with the controlP5 library installed. From the Processing IDE:
+// Tools menu > Manage Tools.. > Libraries tab > type controlp5 in the search field > click the library in the search
+// result > click install, wait for download and install to complete. Possibly restart the Processing IDE thereafter.
 //
 // USAGE
 // Double click to open the sketch in the Processing IDE, or otherwise open it in anything else that can run Processing.
@@ -63,7 +65,7 @@
 //   - to override globals like dimensions
 //   - to override palette, specifying the config as "source" in written metadata
 
-String scriptVersion = "2.8.11";
+String scriptVersion = "2.9.11";
 String scriptName = "Mondrian_Processing";
 String paletteSource = "custom_mondrian";
 String lastAPIPaletteName = "";
@@ -104,7 +106,7 @@ int gridSizeY;           // Number of vertical divisions
 String rule = "AABBCCDDDDDD";
 // see comments at grammarGenerator initialization and in GrammarGenerator.pde:
 int maxLetterRepetitionForGrammarGenerator = 4;
-float keep = 0.5;
+float percentToPatch = 0.5;
 
 // RAPID GEN mode - frame-based state machine (no background thread)
 boolean rapidGenMode = false;
@@ -255,7 +257,7 @@ void ruleField(String value) {
 void percentField(String value) {
   int percent = int(value);
   if (percent >= 0 && percent <= 100) {
-    keep = percent / 100.0;
+    percentToPatch = percent / 100.0;
     if (!rapidGenMode) {
       patch();
     }
@@ -318,7 +320,7 @@ void resetAll() {
   if (rapidGenMode) stopRapidGenMode();
   rule = "AABBCCDDDDDD";
   ruleField.setText(rule);
-  keep = 0.5;
+  percentToPatch = 0.5;
   percentField.setText("50");
   initCustomMondrianPalette();
   colorCountField.setText(str(fullPalette.length));
@@ -793,7 +795,7 @@ void patch() {
   for (int i = 0; i < x1.size(); i++) num.add(i);
   Collections.shuffle(num);
   
-  int q = (int)(x1.size() * keep);
+  int q = (int)(x1.size() * percentToPatch);
   xs1 = new ArrayList<Integer>();
   ys1 = new ArrayList<Integer>();
   xs2 = new ArrayList<Integer>();
@@ -966,6 +968,7 @@ void generateRapidVariant() {
   // API handling is separate and happens in draw()
 }
 
+int crashCount = 0;
 void draw() {
   // Draw dark gray background for the UI panel area (below the artwork)
   fill(color(32));  // Very dark gray
@@ -1017,7 +1020,19 @@ void draw() {
       rapidGenGenerating = true;
       println("--- RAPID GEN: Generating variant ---");
       
-      generateRapidVariant();
+      try {
+        generateRapidVariant();
+      } catch (IndexOutOfBoundsException e) {
+        crashCount++;
+        println("!!! CRASH #" + crashCount + " !!!");
+        println("  Failed rule: " + rule);
+        println("  Grammar length: " + rule.length());
+        println("  Exception: " + e.getMessage());
+        rapidGenGenerating = false;
+        rapidGenExportQueued = false;
+        rapidGenExportDelay = 0;
+        return;
+      }
       
       // Trigger API call if rapidAPI is on and no pending call
       if (rapidAPI && !pendingAPICall) {
@@ -1095,7 +1110,7 @@ void exportToPNG() {
   output.println("Dimensions: " + artWidth + "x" + artHeight);
   output.println("Grid: " + gridSizeX + "x" + gridSizeY);
   output.println("Grammar: " + rule);
-  output.println("Fill percentage: " + int(keep * 100) + "%");
+  output.println("Fill percentage: " + int(percentToPatch * 100) + "%");
   output.println("Line weight: " + currentLineWeight + "px (proportional to " + artWidth + "px width)");
   output.println("Line color: #" + hex(LINE_COLOR, 6));
   output.println("Canvas white: #" + hex(CANVAS_WHITE, 6));
@@ -1149,7 +1164,7 @@ void exportToSVG() {
   output.println("          Dimensions: " + artWidth + "x" + artHeight);
   output.println("          Grid: " + gridSizeX + "x" + gridSizeY);
   output.println("          Grammar: " + rule);
-  output.println("          Fill percentage: " + int(keep * 100) + "%");
+  output.println("          Fill percentage: " + int(percentToPatch * 100) + "%");
   output.println("          Line weight: " + currentLineWeight + "px");
   output.println("          Line color: #" + hex(LINE_COLOR, 6));
   output.println("          Canvas white: #" + hex(CANVAS_WHITE, 6));
@@ -1230,4 +1245,12 @@ void exportToSVG() {
   output.close();
   
   println("Saved SVG: " + filename);
+}
+
+void keyPressed() {
+  if (key == 's' || key == 'S') {
+    if (exportPNG) exportToPNG();
+    if (exportSVG) exportToSVG();
+    println("Manual export triggered via keyboard");
+  }
 }
