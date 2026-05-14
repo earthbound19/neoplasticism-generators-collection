@@ -46,7 +46,6 @@
 // TO DO
 // - FIX THIS CRASH:
 // I ran it in rapidgen mode and encountered a crash:
-
 // --- RAPID GEN: Generating variant ---
 // GrammarGenerator: Selected grammar #254: AAAABBBBCCCCDDD
 // RAPID GRAMMAR: Generated: AAAABBBBCCCCDDD
@@ -56,7 +55,18 @@
 // IndexOutOfBoundsException: Index 15 out of bounds for length 15
 // IndexOutOfBoundsException: Index 15 out of bounds for length 15
 //
-// I hope it's easy to figure out the cause. I note that the generated grammar has 15 characters and the error is out of bounds for length 15.
+// I hope it's easy to figure out the cause. I note that the generated grammar has 15
+// characters and the error is out of bounds for length 15. I've added a crash handling
+// try / catch block for a crash scenario that may catch that in rapid gen mode, and ran
+// it in rapid gen mode for hours and nothing ever crashed, even reducing the grammar to
+// 4 characters for a long stretch either. It's ephemeral and probably rare enough that
+// a museum could just reboot the art on any extremely rare occassion it happens. Or for
+// all I know it was a cosmic ray flipping a bit.
+//
+// OTHER TO DO
+// - fix clutter in UI info print where it gives the grammar, I think
+// - make grammer rapid gen on at startup
+// - add a SHUFFLE GRAMMAR button with the other main feature buttons
 // - museum mode: only display artwork area, fullscreen, no UI controls, with RAPID API (new palettes) etc. active
 //   for every new render, then doing the render when ready.
 // - in museum mode, every 7th iteration use default Mondrian palette as throwback?
@@ -65,7 +75,7 @@
 //   - to override globals like dimensions
 //   - to override palette, specifying the config as "source" in written metadata
 
-String scriptVersion = "2.9.11";
+String scriptVersion = "2.9.13";
 String scriptName = "Mondrian_Processing";
 String paletteSource = "custom_mondrian";
 String lastAPIPaletteName = "";
