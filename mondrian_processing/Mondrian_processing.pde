@@ -21,6 +21,9 @@
 //   - auto-save of variants to PNG and / or SVG controlle by global booleans that can be hacked (exportPNG, exportSVG)
 // - RAPID GEN sub-modes: control random lines, patches, colours, API retrieval from a collection, and grid grammar per variant
 //
+// ===============================================================
+// REQUIRED: controlP5 LIBRARY; see:
+// ===============================================================
 // DEPENDENCIES
 // Processing (possibly only v4 or higher), with the controlP5 library installed. From the Processing IDE:
 // Tools menu > Manage Tools.. > Libraries tab > type controlp5 in the search field > click the library in the search
@@ -28,9 +31,9 @@
 //
 // USAGE
 // Double click to open the sketch in the Processing IDE, or otherwise open it in anything else that can run Processing.
-// Run the sketch. Click on the rule text box to edit line construction grammar (any combination of the letters A, B, C, and D,
+// Run the sketch. Click on the GRAMMAR STRING text box to edit line construction grammar (any combination of the letters A, B, C, and D,
 // repetition allowed). Edit other parameters in text areas to your wishes also.
-// Press ENTER in any field where you have edited the values to generate a new composition based on that rule.
+// Press ENTER in any field where you have edited the values to generate a new composition based on that grammar.
 // Press S to save PNG and/or SVG (see booleans at top). Click PNG/SVG buttons to export (buttons override booleans).
 // Click "RAPID GEN" to enter generation mode. The text "RAPID GEN" on the button will change to "STOP." Press "STOP" to exit
 // RAPID GEN mode. In RAPID GEN mode, the sketch generates and saves endless variations with the current grammar etc. settings.
@@ -44,13 +47,27 @@
 //
 // CODE
 // TO DO
-// - FIX THIS CRASH:
+// - make a global basefile name with random string append before script version, which is set ONCE before PNG and / or SVG export; to:
+//  - avoid clobbers of files exported in the same microsecond (it could happen? -- as the file name only captures seconds)
+//  - ensure PNG and SVGs are unambiguosly paired via basename in the case of some second overlap during export
+// - print errors to UI errorlabel in these cases:
+//  - API fetch failures
+//  - Invalid grammar entered (though the filter already handles this)
+//  - Attempting to start RAPID GEN with no sub-modes active
+// - museum mode: only display artwork area, fullscreen, no UI controls, with RAPID API (new palettes) etc. active
+//   for every new render, then doing the render when ready.
+// - in museum mode, every 7th iteration use default Mondrian palette as throwback?
+// - CLI mode accepting a JSON config and dynamically patching settings
+//   - to start any mode thereby also?
+//   - to override globals like dimensions
+//   - to override palette, specifying the config as "source" in written metadata
+// BACKLOG; apparently not a critical / recurrent issue: fix this crash:
 // I ran it in rapidgen mode and encountered a crash:
 // --- RAPID GEN: Generating variant ---
 // GrammarGenerator: Selected grammar #254: AAAABBBBCCCCDDD
 // RAPID GRAMMAR: Generated: AAAABBBBCCCCDDD
 // RAPID GRAMMAR: Applying: AAAABBBBCCCCDDD
-// DEBUG: crv() called with rule = AAAABBBBCCCCDDD
+// DEBUG: crv() called with grammar = AAAABBBBCCCCDDD
 // --- RAPID GEN: Exports queued (will export in 3 frames) ---
 // IndexOutOfBoundsException: Index 15 out of bounds for length 15
 // IndexOutOfBoundsException: Index 15 out of bounds for length 15
@@ -62,24 +79,14 @@
 // 4 characters for a long stretch either. It's ephemeral and probably rare enough that
 // a museum could just reboot the art on any extremely rare occassion it happens. Or for
 // all I know it was a cosmic ray flipping a bit.
-//
-// OTHER TO DO
-// - fix clutter in UI info print where it gives the grammar, I think
-// - make grammer rapid gen on at startup
-// - add a SHUFFLE GRAMMAR button with the other main feature buttons
-// - museum mode: only display artwork area, fullscreen, no UI controls, with RAPID API (new palettes) etc. active
-//   for every new render, then doing the render when ready.
-// - in museum mode, every 7th iteration use default Mondrian palette as throwback?
-// - CLI mode accepting a JSON config and dynamically patching settings
-//   - to start any mode thereby also?
-//   - to override globals like dimensions
-//   - to override palette, specifying the config as "source" in written metadata
 
-String scriptVersion = "2.9.13";
+String scriptVersion = "2.11.55";
 String scriptName = "Mondrian_Processing";
 String paletteSource = "custom_mondrian";
 String lastAPIPaletteName = "";
 String lastAPIPaletteURL = "";
+String paletteString = "";
+int errorLabelHideTime = 0;
 
 import processing.svg.*;
 import java.util.Collections;
@@ -113,7 +120,7 @@ int canvasHeight;
 int gridSizeX;           // Number of horizontal divisions
 int gridSizeY;           // Number of vertical divisions
 
-String rule = "AABBCCDDDDDD";
+String grammar = "AAAABBBBCCCCDDD";
 // see comments at grammarGenerator initialization and in GrammarGenerator.pde:
 int maxLetterRepetitionForGrammarGenerator = 4;
 float percentToPatch = 0.5;
@@ -204,7 +211,7 @@ void settings() {
 }
 
 void setup() {
-  surface.setTitle(scriptName + " v" + scriptVersion);
+  // surface.setTitle(scriptName + " v" + scriptVersion);
   
   // Initialize grammar generator; can pass any integer but counts will explode at higher numbers;
   // Generates grammars like A...B...C...D... with configurable max per letter; passing it 4 will
@@ -228,6 +235,14 @@ void setup() {
   // Update the color count field with actual palette size
   colorCountField.setText(str(fullPalette.length));
 
+  // Enable grammar rapid gen mode by default
+  rapidGrammar = true;
+  // Update the toggle UI to reflect the enabled state
+  if (rapidGrammarToggle != null) {
+    rapidGrammarToggle.setValue(1);
+    rapidGrammarToggle.setColorCaptionLabel(color(64));
+  }  
+
   crv();
   patch();
   colour();
@@ -244,7 +259,7 @@ void setup() {
 
 // The setupUI() function could be here but it is in UI_Controls.pde in the same folder, auto-imported by Processing.
 
-void ruleField(String value) {
+void grammarField(String value) {
   // Filter to only A,B,C,D
   String cleaned = "";
   for (int i = 0; i < value.length(); i++) {
@@ -254,8 +269,8 @@ void ruleField(String value) {
     }
   }
   if (cleaned.length() > 0) {
-    rule = cleaned;
-    ruleField.setText(rule);
+    grammar = cleaned;
+    grammarField.setText(grammar);
     if (!rapidGenMode) {
       crv();
       patch();
@@ -328,8 +343,8 @@ void rapidColourToggle(boolean value) {
 void resetAll() {
   resetStatusMessage();
   if (rapidGenMode) stopRapidGenMode();
-  rule = "AABBCCDDDDDD";
-  ruleField.setText(rule);
+  grammar = "AABBCCDDDDDD";
+  grammarField.setText(grammar);
   percentToPatch = 0.5;
   percentField.setText("50");
   initCustomMondrianPalette();
@@ -387,6 +402,49 @@ void shuffleColour() {
     colour();
   } else {
     println("Can't shuffle while RAPID GEN active");
+  }
+}
+
+void shuffleGrammar() {
+  resetStatusMessage();
+  if (!rapidGenMode) {
+    // Get a random grammar from the generator
+    String newGrammar = grammarGenerator.getRandomGrammar();
+    println("SHUFFLE GRAMMAR: Generated: " + newGrammar);
+    
+    if (!newGrammar.equals(grammar)) {
+      grammar = newGrammar;
+      println("SHUFFLE GRAMMAR: Applying: " + grammar);
+      
+      // Update the text field display
+      grammarField.setText(grammar);
+      
+      // Regenerate the composition with the new grammar
+      crv();
+      patch();
+      colour();
+      
+      // No status message - grammar appears in main status line
+    } else {
+      println("SHUFFLE GRAMMAR: Random gave same grammar, trying again...");
+      // Try one more time with a different grammar
+      newGrammar = grammarGenerator.getRandomGrammar();
+      if (!newGrammar.equals(grammar)) {
+        grammar = newGrammar;
+        println("SHUFFLE GRAMMAR: Applying on second try: " + grammar);
+        grammarField.setText(grammar);
+        crv();
+        patch();
+        colour();
+      } else {
+        println("SHUFFLE GRAMMAR: Same grammar twice - keeping current");
+      }
+    }
+  } else {
+    println("Can't shuffle grammar while RAPID GEN active");
+    errorLabel.setText("ERROR: Stop RAPID GEN first");
+    errorLabel.setVisible(true);
+    errorLabelHideTime = millis() + 6000;
   }
 }
 
@@ -573,6 +631,9 @@ void fetchColorsFromAPI() {
         println("Palette URL: " + lastAPIPaletteURL);
       } catch (Exception e) {
         println("API fetch failed: " + e.getMessage());
+        errorLabel.setText("ERROR: API fetch failed");
+        errorLabel.setVisible(true);
+        errorLabelHideTime = millis() + 6000;
         // On failure, signal that call is done but no new palette
         newPaletteReady = true;
       }
@@ -581,11 +642,33 @@ void fetchColorsFromAPI() {
   t.start();
 }
 
+// String randomString(int length) {
+//   String chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+//   String result = "";
+//   for (int i = 0; i < length; i++) {
+//     int index = (int)random(chars.length());
+//     result += chars.charAt(index);
+//   }
+//   return result;
+// }
+
 void crv() {
-  println("DEBUG: crv() called with rule = " + rule);
+  println("DEBUG: crv() called with grammar = " + grammar);
 
   // Re-randomize line weight for this new composition
   calculateLineWeight();
+  if (paletteSource.equals("api") && lastAPIPaletteName.length() > 0) {
+    paletteString = " | Palette: " + lastAPIPaletteName;
+  } else if (paletteSource.equals("api") && pendingAPICall) {
+    paletteString = " | Fetching palette...";
+  } else {
+    paletteString = " | Palette: Built-in Mondrian";
+  }
+  // hacky: make the remainder of the status label a blank string, to clear otherwise not clearing text as the function draws "nothing" to text background:
+  int maxLength = 200;
+  String labelString = scriptName + " v" + scriptVersion + " | Line: " + nf(currentLineWeight, 0, 0) + "px" + (rapidGenMode ? " | RAPID GEN ACTIVE" : "") + paletteString;
+  labelString = String.format("%-" + maxLength + "s", labelString);
+  statusLabel.setText(labelString);
   minLineDistance = currentLineWeight * 2;
 
   A_gr = new ArrayList<Integer>();
@@ -618,7 +701,7 @@ void crv() {
     B_gr.add(i);
   }
   
-  for (int charIdx = 0; charIdx < rule.length(); charIdx++) {
+  for (int charIdx = 0; charIdx < grammar.length(); charIdx++) {
     for (int f = 0; f < x1.size(); f++) {
       if (x1.get(f) > x2.get(f)) {
         int dum = x2.get(f);
@@ -632,7 +715,7 @@ void crv() {
       }
     }
     
-    char c = rule.charAt(charIdx);
+    char c = grammar.charAt(charIdx);
     if (c == 'A') {
       // Add a vertical line with collision avoidance
       if (A_gr.size() == 0) continue;
@@ -911,7 +994,9 @@ boolean startRapidGenMode() {
     println("  Enable at least one of: Rapid Lines, Rapid Patch, Rapid Colour, or Rapid API");
     println("  Rapid Grammar: " + (rapidGrammar ? "ON" : "OFF"));
     statusMessage = "ERROR: Enable at least one RAPID mode (Lines, Patch, Colour, or API)";
-    statusMessageTimer = 180;
+    errorLabel.setText(statusMessage);
+    errorLabel.setVisible(true);
+    errorLabelHideTime = millis() + 6000;
     return false;
   }
   
@@ -946,14 +1031,14 @@ void generateRapidVariant() {
     String newGrammar = grammarGenerator.getRandomGrammar();
     println("RAPID GRAMMAR: Generated: " + newGrammar);  // Print to stdout
     
-    if (!newGrammar.equals(rule)) {
-      rule = newGrammar;
-      println("RAPID GRAMMAR: Applying: " + rule);  // Print to stdout
+    if (!newGrammar.equals(grammar)) {
+      grammar = newGrammar;
+      println("RAPID GRAMMAR: Applying: " + grammar);  // Print to stdout
       
       // Update the text field display
-      ruleField.setText(rule);
+      grammarField.setText(grammar);
       // Force the text field to redraw
-      ruleField.setColorBackground(color(64));
+      grammarField.setColorBackground(color(64));
       
       linesChanged = true;
     }
@@ -980,8 +1065,8 @@ void generateRapidVariant() {
 
 int crashCount = 0;
 void draw() {
-  // Draw dark gray background for the UI panel area (below the artwork)
-  fill(color(32));  // Very dark gray
+  // Draw background for the UI panel area (below the artwork)
+  fill(color(uiBackgroundColor));
   noStroke();
   rect(0, artHeight, width, uiPanelHeight);
 
@@ -1035,8 +1120,8 @@ void draw() {
       } catch (IndexOutOfBoundsException e) {
         crashCount++;
         println("!!! CRASH #" + crashCount + " !!!");
-        println("  Failed rule: " + rule);
-        println("  Grammar length: " + rule.length());
+        println("  Failed grammar: " + grammar);
+        println("  Grammar length: " + grammar.length());
         println("  Exception: " + e.getMessage());
         rapidGenGenerating = false;
         rapidGenExportQueued = false;
@@ -1063,27 +1148,6 @@ void draw() {
   
   drawArtwork();
   
-  // Draw simple status line (replaces old drawUI)
-  fill(200);
-  textSize(10);
-  textAlign(LEFT, CENTER);
-  String status = scriptName + " v" + scriptVersion + " | Line weight: " + nf(currentLineWeight, 0, 0) + "px";
-  if (rapidGenMode) status += " | RAPID GEN ACTIVE";
-  if (rapidAPI && pendingAPICall) status += " | Waiting for API...";
-  text(status, 20, height - 10);
-  
-  // Draw error/status message if present
-  if (statusMessageTimer > 0 && statusMessage.length() > 0) {
-    fill(255, 100, 100);
-    textSize(10);
-    textAlign(LEFT, CENTER);
-    text(statusMessage, 20, height - 25);
-    statusMessageTimer--;
-    if (statusMessageTimer <= 0) {
-      statusMessage = "";
-    }
-  }
-  
   if (pendingExportPNG) {
     exportToPNG();
     pendingExportPNG = false;
@@ -1091,6 +1155,12 @@ void draw() {
   if (pendingExportSVG) {
     exportToSVG();
     pendingExportSVG = false;
+  }
+
+  if (errorLabelHideTime > 0 && millis() > errorLabelHideTime) {
+    String clearString = String.format("%-80s", "");
+    errorLabel.setText(clearString);
+    errorLabelHideTime = 0;
   }
 }
 
@@ -1119,7 +1189,7 @@ void exportToPNG() {
   output.println("Created with " + scriptName + ".pde v" + scriptVersion);
   output.println("Dimensions: " + artWidth + "x" + artHeight);
   output.println("Grid: " + gridSizeX + "x" + gridSizeY);
-  output.println("Grammar: " + rule);
+  output.println("Grammar: " + grammar);
   output.println("Fill percentage: " + int(percentToPatch * 100) + "%");
   output.println("Line weight: " + currentLineWeight + "px (proportional to " + artWidth + "px width)");
   output.println("Line color: #" + hex(LINE_COLOR, 6));
@@ -1173,7 +1243,7 @@ void exportToSVG() {
   output.println("          Created with " + scriptName + ".pde v" + scriptVersion);
   output.println("          Dimensions: " + artWidth + "x" + artHeight);
   output.println("          Grid: " + gridSizeX + "x" + gridSizeY);
-  output.println("          Grammar: " + rule);
+  output.println("          Grammar: " + grammar);
   output.println("          Fill percentage: " + int(percentToPatch * 100) + "%");
   output.println("          Line weight: " + currentLineWeight + "px");
   output.println("          Line color: #" + hex(LINE_COLOR, 6));
