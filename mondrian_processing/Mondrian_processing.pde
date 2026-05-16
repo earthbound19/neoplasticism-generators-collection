@@ -82,7 +82,7 @@
 // a museum could just reboot the art on any extremely rare occassion it happens. Or for
 // all I know it was a cosmic ray flipping a bit.
 
-String scriptVersion = "2.11.55";
+String scriptVersion = "2.12.7";
 String scriptName = "Mondrian_Processing";
 String paletteSource = "custom_mondrian";
 String lastAPIPaletteName = "";
@@ -97,6 +97,26 @@ import java.util.Calendar;
 // Export settings
 boolean exportPNG = true;
 boolean exportSVG = true;
+
+// if the adaptElementsToCanvasScale is true, no matter what size you make the canvas, the Mondrian-esque
+// lines (and resulting related area fills) will scale up or down so that the proportions or
+// wight of lines are typical of his paintings at any scale; for a larger or smaller canvas
+// it will effectively be a blown up or miniaturized Mondrian painting. If the following is false,
+// lines will remain at "life size" no matter how large or small the canvas, and for example
+// with a much larger canvas it will be filled with more work detail if the lines grammar allows.
+// Whereas a smaller canvas will be more filled with "real" scale lines. You can think of
+// adaptElementsToCanvasScale = true as meaning "Extend canvas mode;" a larger canvas will keep "real life"
+// line weights but distribute lines over a wider area, and make more of them if you enter
+// a more complex line grammar. Hard-coded default true:
+boolean adaptElementsToCanvasScale = true;
+// furtherScaleFactor is an additional percent calculation after the hard-coded scale calculation
+// to make the line weight heaver or lighter after that. To make lines heavier, set furtherScaleFactor
+// higher than 1, e.g. 1.2 will makes lines 120% of default scale; it is a percent as decimal
+// multiplier. Or set it to a decimal lower than 1 to make a lighter than default line weight.
+// The hard-coded default 1.
+// NOTE: in either and all cases, an absolute minimum line weight is enforced that overrides anything
+// deemed too light; see the ABSOLUTE_MIN_WEIGHT variable declaration:
+float furtherScaleFactor = 1;
 
 // Layout settings
 // An assumed real life "average" art width and height from surveying many Mondrian works is; 66.95cm x 62.97cm;
@@ -116,7 +136,6 @@ int gridSizeReference = 28;  // Reference grid size for the shorter dimension; o
 // - At 2438px width:
 //  - minimum line weight matching Mondrian neoplastic paintings real-world size is: 22px
 //  - maximum line weight matching Mondrian neoplastic paintings real-world size is: 68px
-// BUT THAT IS DEPRECATED; see notes near scaleFactor calculation:
 final float REFERENCE_WIDTH = 2438;
 final float REFERENCE_MIN_WEIGHT = 22;
 final float REFERENCE_MAX_WEIGHT = 68;
@@ -133,7 +152,7 @@ int gridSizeY;           // Number of vertical divisions
 String grammar = "AAAABBBBCCCCDDD";
 // see comments at grammarGenerator initialization and in GrammarGenerator.pde:
 int maxLetterRepetitionForGrammarGenerator = 4;
-float percentToPatch = 0.5;
+float percentToPatch = 0.33;
 
 // RAPID GEN mode - frame-based state machine (no background thread)
 boolean rapidGenMode = false;
@@ -356,8 +375,8 @@ void resetAll() {
   if (rapidGenMode) stopRapidGenMode();
   grammar = "AABBCCDDDDDD";
   grammarField.setText(grammar);
-  percentToPatch = 0.5;
-  percentField.setText("30");
+  percentToPatch = 0.33;
+  percentField.setText("33");
   initCustomMondrianPalette();
   colorCountField.setText(str(fullPalette.length));
   crv();
@@ -488,9 +507,14 @@ void exportSVGButton() {
   exportToSVG();
 }
 
+float scaleFactor = 1;
 void calculateLineWeight() {
-  // Calculate proportional scaling factor based on actual artWidth
-  float scaleFactor = artWidth / REFERENCE_WIDTH;
+  // Calculate proportional scaling additional factor; SEE COMMENTS AT adaptElementsToCanvasScale declaraction:
+  if (adaptElementsToCanvasScale == true) {
+    scaleFactor = artWidth / REFERENCE_WIDTH;
+  }
+  // A wasted calculation if further ScaleFactor = 1; but so would a conditional check sorta be:
+  scaleFactor *= furtherScaleFactor;
   
   // Calculate min and max for this canvas size
   float scaledMin = REFERENCE_MIN_WEIGHT * scaleFactor;
@@ -664,7 +688,7 @@ void fetchColorsFromAPI() {
 // }
 
 void crv() {
-  println("DEBUG: crv() called with grammar = " + grammar);
+  // println("DEBUG: crv() called with grammar = " + grammar);
 
   // Re-randomize line weight for this new composition
   calculateLineWeight();
@@ -1338,10 +1362,11 @@ void exportToSVG() {
   println("Saved SVG: " + filename);
 }
 
+// keypress overrides exportPNG and exportSVG booleans:
 void keyPressed() {
   if (key == 's' || key == 'S') {
-    if (exportPNG) exportToPNG();
-    if (exportSVG) exportToSVG();
-    println("Manual export triggered via keyboard");
+    exportToPNG();
+    exportToSVG();
+    println("Manual export triggered via keyboard; PNG and SVG of current variant saved.");
   }
 }
