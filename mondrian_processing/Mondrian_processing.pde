@@ -61,6 +61,8 @@
 //   - to start any mode thereby also?
 //   - to override globals like dimensions
 //   - to override palette, specifying the config as "source" in written metadata
+// - rare line behind other lines which is a color from the palette and not black?? re: https://www.wikiart.org/en/piet-mondrian/composition-with-red-yellow-and-blue-1942
+//  - how? simply delete or never render the black lines around them? I think they may be fills, not lines. also at: https://www.wikiart.org/en/piet-mondrian/composition-no-10-1942
 // BACKLOG; apparently not a critical / recurrent issue: fix this crash:
 // I ran it in rapidgen mode and encountered a crash:
 // --- RAPID GEN: Generating variant ---
@@ -97,19 +99,27 @@ boolean exportPNG = true;
 boolean exportSVG = true;
 
 // Layout settings
-// An assumed "average" art width and height from surveying many Mondrian works is; 839 x 886 px;
-// this hard-coded may proportionally scale down from that (aspect w/h = 0.9469) :
+// An assumed real life "average" art width and height from surveying many Mondrian works is; 66.95cm x 62.97cm;
+// or 26.36in x	24.79x, which @ 72dpi is 1898px x	1785px; aspect w/h = 1.06 -- pretty much, he
+// liked squares, but there was variation -- AND from another survey (different image set) I got 
+// average 839 x 886 px; this hard-coded may proportionally scale down from that (aspect w/h = 0.9469) :
 int artWidth = 840;
 int artHeight = 886;
 int uiPanelHeight = 120;  // Height reserved for UI controls below artwork
 int gridSizeReference = 28;  // Reference grid size for the shorter dimension; orig. 32 and hard-coded may differ
 
-// Line weight configuration - PROPORTIONAL SCALING
-// Reference dimensions: max canvas width = 1022px
-// At 1022px width: min line weight = 6px, max line weight = 32px
-final float REFERENCE_WIDTH = 1022;
-final float REFERENCE_MIN_WEIGHT = 6;
-final float REFERENCE_MAX_WEIGHT = 32;
+// - line weight notes:
+//  - piet-mondriaan-1930-mondrian-composition-ii-in-red-blue-and-yellow.jpg resized to real life dimension (72dpi @ cm size match) ; ref width 2438; line match at weight 68
+//  - Composition_A_by_Piet_Mondrian_Galleria_Nazionale_d'Arte_Moderna_e_Contemporanea.jpg resized to real life dimension (72dpi @ cm size match) ; ref width 2594; line match at weight 22
+// FROM THAT ^ : Line weight configuration - PROPORTIONAL SCALING
+// Reference dimensions: max canvas width = 2438px
+// - At 2438px width:
+//  - minimum line weight matching Mondrian neoplastic paintings real-world size is: 22px
+//  - maximum line weight matching Mondrian neoplastic paintings real-world size is: 68px
+// BUT THAT IS DEPRECATED; see notes near scaleFactor calculation:
+final float REFERENCE_WIDTH = 2438;
+final float REFERENCE_MIN_WEIGHT = 22;
+final float REFERENCE_MAX_WEIGHT = 68;
 
 float currentLineWeight;  // Will be set randomly on each run
 float minLineDistance;    // Minimum distance between lines (currentLineWeight * 2)
@@ -198,6 +208,7 @@ ArrayList<Integer> ys2;
 ArrayList<Integer> rec_col;
 ArrayList<Integer> num;
 
+
 void settings() {
   pixelDensity(1);
   
@@ -211,7 +222,7 @@ void settings() {
 }
 
 void setup() {
-  // surface.setTitle(scriptName + " v" + scriptVersion);
+  surface.setTitle(scriptName + " v" + scriptVersion);
   
   // Initialize grammar generator; can pass any integer but counts will explode at higher numbers;
   // Generates grammars like A...B...C...D... with configurable max per letter; passing it 4 will
@@ -346,7 +357,7 @@ void resetAll() {
   grammar = "AABBCCDDDDDD";
   grammarField.setText(grammar);
   percentToPatch = 0.5;
-  percentField.setText("50");
+  percentField.setText("30");
   initCustomMondrianPalette();
   colorCountField.setText(str(fullPalette.length));
   crv();
