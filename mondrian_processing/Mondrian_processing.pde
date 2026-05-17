@@ -20,6 +20,7 @@
 // - RAPID GEN mode: infinite, rapid generation of variants (frame-based state machine, no background threading)
 //   - auto-save of variants to PNG and / or SVG controlle by global booleans that can be hacked (exportPNG, exportSVG)
 // - RAPID GEN sub-modes: control random lines, patches, colours, API retrieval from a collection, and grid grammar per variant
+//   - with hard-coded delay between palette retrievals to allow render and / or export of many variants per palette
 //
 // ===============================================================
 // REQUIRED: controlP5 LIBRARY; see:
@@ -82,7 +83,7 @@
 // a museum could just reboot the art on any extremely rare occassion it happens. Or for
 // all I know it was a cosmic ray flipping a bit.
 
-String scriptVersion = "2.12.7";
+String scriptVersion = "2.15.15";
 String scriptName = "Mondrian_Processing";
 String paletteSource = "custom_mondrian";
 String lastAPIPaletteName = "";
@@ -168,12 +169,13 @@ boolean rapidAPI = false;     // Fetch new palette for every variant (default OF
 boolean rapidGrammar = false;  // Randomize grammar (types and combinations of lines) for every variant (default OFF)
 boolean pendingAPICall = false;
 int apiCallStartTime = 0;
+int APImillisElapsed = 0;
 boolean newPaletteReady = false;
 final int API_TIMEOUT_MS = 12000;  // 12 seconds timeout
+boolean APIcallDelaySet = false;   // tells whether a delay has been set to call the color retreival API
+final int API_DELAY_BETWEEN_CALLS = 9650;   // time in ms (1000ms = 1s) between new API calls
 
-// Export flags for frame-synchronized capture
-boolean pendingExportPNG = false;
-boolean pendingExportSVG = false;
+String pendingExportBaseName = null;  // for paired rapid gen PNG and SVG exports
 
 String statusMessage = "";
 int statusMessageTimer = 0;
@@ -1139,9 +1141,8 @@ void draw() {
     if (rapidGenExportDelay > 0) {
       rapidGenExportDelay--;
     } else if (rapidGenExportQueued) {
-      // Export now (after delay frames have passed)
-      if (exportPNG) pendingExportPNG = true;
-      if (exportSVG) pendingExportSVG = true;
+      // Generate base name now for paired export
+      pendingExportBaseName = getTimestamp();
       rapidGenExportQueued = false;
       rapidGenExportDelay = 2;  // Brief pause between cycles
       println("--- RAPID GEN: Cycle complete ---");
@@ -1164,14 +1165,25 @@ void draw() {
         return;
       }
       
-      // Trigger API call if rapidAPI is on and no pending call
       if (rapidAPI && !pendingAPICall) {
-        pendingAPICall = true;
-        newPaletteReady = false;
-        apiCallStartTime = millis();
-        fetchColorsFromAPI();
-        println("RAPID API: Fetching new palette...");
-        // Note: We already generated the variant, now wait for API to update colors for NEXT cycle
+        if (!APIcallDelaySet) {
+          APIcallDelaySet = true;
+          // set start time for API all delay
+          APImillisElapsed = millis();
+          println("APIcallDelaySet: have set APImillisElapsed " + APImillisElapsed + " to wait for call");
+        } else {
+          // if the intended delay between API calls has elapsed, try an API call
+          if (millis() - APImillisElapsed > API_DELAY_BETWEEN_CALLS)
+          {
+            APIcallDelaySet = false;
+            pendingAPICall = true;
+            newPaletteReady = false;
+            apiCallStartTime = millis();
+            fetchColorsFromAPI();
+            println("Color retrieval API: Fetching new palette...");
+            // Note: We already generated the variant, now wait for API to update colors for NEXT cycle
+          }
+        }
       }
       
       rapidGenGenerating = false;
@@ -1183,13 +1195,11 @@ void draw() {
   
   drawArtwork();
   
-  if (pendingExportPNG) {
-    exportToPNG();
-    pendingExportPNG = false;
-  }
-  if (pendingExportSVG) {
-    exportToSVG();
-    pendingExportSVG = false;
+  // Process pending rapid gen export with paired naming
+  if (pendingExportBaseName != null) {
+    if (exportPNG) exportToPNG(pendingExportBaseName);
+    if (exportSVG) exportToSVG(pendingExportBaseName);
+    pendingExportBaseName = null;
   }
 
   if (errorLabelHideTime > 0 && millis() > errorLabelHideTime) {
@@ -1201,15 +1211,22 @@ void draw() {
 
 String getTimestamp() {
   Calendar cal = Calendar.getInstance();
-  return String.format("%04d_%02d_%02d_%02d_%02d_%02d",
+  return String.format("%04d_%02d_%02d_%02d_%02d_%02d__%04d",
     cal.get(Calendar.YEAR), cal.get(Calendar.MONTH) + 1, cal.get(Calendar.DAY_OF_MONTH),
-    cal.get(Calendar.HOUR_OF_DAY), cal.get(Calendar.MINUTE), cal.get(Calendar.SECOND));
+    cal.get(Calendar.HOUR_OF_DAY), cal.get(Calendar.MINUTE), cal.get(Calendar.SECOND),
+    cal.get(Calendar.MILLISECOND)
+  );
 }
 
+// PNG export function that handles basename creation
+// itself by creating the basename and passing it to the main function
 void exportToPNG() {
-  String timestamp = getTimestamp();
-  String baseFilename = timestamp + "_" + scriptName + "_v" + scriptVersion;
-  String filename = baseFilename + ".png";
+  exportToPNG(getTimestamp());
+}
+
+// main PNG export function
+void exportToPNG(String baseName) {
+  String filename = baseName + ".png";
   
   // Force rendering to complete before capture
   loadPixels();
@@ -1219,7 +1236,7 @@ void exportToPNG() {
   artwork.save(filename);
   
   // Save metadata as .txt with same base name
-  String metadataFile = baseFilename + ".txt";
+  String metadataFile = baseName + ".txt";
   PrintWriter output = createWriter(metadataFile);
   output.println("Created with " + scriptName + ".pde v" + scriptVersion);
   output.println("Dimensions: " + artWidth + "x" + artHeight);
@@ -1244,18 +1261,21 @@ void exportToPNG() {
       output.println("#" + hex(fullPalette[i], 6));
     }
   }
-
   output.println("Active colors: " + activePalette.length);
-
   output.flush();
   output.close();
   println("Saved PNG: " + filename);
 }
 
+// SVG export function that handles basename creation
+// itself by creating the basename and passing it to the main function
 void exportToSVG() {
-  String timestamp = getTimestamp();
-  String baseFilename = timestamp + "_" + scriptName + "_v" + scriptVersion;
-  String filename = baseFilename + ".svg";
+  exportToSVG(getTimestamp());
+}
+
+// Main SVG export function
+void exportToSVG(String baseName) {
+  String filename = baseName + ".svg";
   
   PrintWriter output = createWriter(filename);
   
@@ -1362,11 +1382,18 @@ void exportToSVG() {
   println("Saved SVG: " + filename);
 }
 
-// keypress overrides exportPNG and exportSVG booleans:
+// Wrapper to export both formats with the same base name;
+// in all settings we do this it overrides export booleans, so no boolean checks:
+void exportVariant() {
+  String baseName = getTimestamp();
+  exportToPNG(baseName);
+  exportToSVG(baseName);
+}
+
+// export PNG and SVG on keypress:
 void keyPressed() {
   if (key == 's' || key == 'S') {
-    exportToPNG();
-    exportToSVG();
+    exportVariant();  // Use wrapper for paired exports
     println("Manual export triggered via keyboard; PNG and SVG of current variant saved.");
   }
 }
